@@ -432,13 +432,13 @@ let RandomSideEffectStart = [
   ];
 
 function isTrue(word) {
-  if ("yes,ya,yep,yeah,sorta,true,i do,okay,ok,o.k.,sure".indexOf(word) != -1)
+  if ("yes,ya,yep,yeah,sorta,true,i do,okay,ok,o.k.,sure".indexOf(word.toLowerCase()) != -1)
     return true;
   return false;
 }
 
 function isFalse(word) {
-  if ("no,nope,nah,false,none".indexOf(word) != -1)
+  if ("no,nope,nah,false,none".indexOf(word.toLowerCase()) != -1)
     return true;
   return false;
 }
@@ -634,6 +634,27 @@ function handleSendMessage(self, user, word) {
       });
       return;
   }
+
+  if (self.attributes.state=="SendMessageGetMessage") {
+      self.attributes.state = 'Start';
+	  console.log('will send to user: ',self.attributes.sendTo,' msg:',word.value);
+          request.post("https://api.twilio.com/2010-04-01/Accounts/AC6203fa66f81b40708bbc4810c28fe049/Messages",
+            { 
+		body: "&From=+16179968873&To="+self.attributes.sendTo+",&Body="+word.value,
+		headers: {'content-type' : 'application/x-www-form-urlencoded'},
+	       auth: {
+		   'user': 'AC6203fa66f81b40708bbc4810c28fe049',
+		   'pass': '6866b679dd68e09efb537d43cc5f6dba'
+	       }
+	    },
+            (err, resp, body) => {
+		if (err) self.attributes.prefix += "Message failed:"+err+" ";
+		else self.attributes.prefix+="Message sent. ";
+		self.emit('InteractionIntent');
+            }
+            );
+          return;
+      }
   
   if (self.attributes.state == 'SendMessageGetUser') {
     console.log('SendMessage: GetUser, got word:',word.value);
@@ -648,23 +669,13 @@ function handleSendMessage(self, user, word) {
     let users = self.attributes.users;
     for (let i=0; i < users.length; i++) {
       if (users[i].contact.firstName.toLowerCase() == word.value) {
-	  console.log('will send to user: ',word.value);
-          request.post("https://api.twilio.com/2010-04-01/Accounts/AC6203fa66f81b40708bbc4810c28fe049/Messages",
-            { 
-		body: "&From=+16179968873&To="+users[i].phone+",&Body=I hope you feel better",
-		headers: {'content-type' : 'application/x-www-form-urlencoded'},
-	       auth: {
-		   'user': 'AC6203fa66f81b40708bbc4810c28fe049',
-		   'pass': '6866b679dd68e09efb537d43cc5f6dba'
-	       }
-	    },
-            (err, resp, body) => {
-		if (err) self.attributes.prefix += "Message failed:"+err+" ";
-		else self.attributes.prefix+="Message sent. ";
-		self.emit('InteractionIntent');
-            }
-            );
-          return;
+	  console.log('Asking for the message to send...');
+	  self.attributes.sendTo=users[i].phone;
+	  self.attributes.state="SendMessageGetMessage";
+	  self.emit(':elicitSlot','RandomWordSlot',
+		    getPrefix(self)+' Tell me the message; keep it short please.',
+		    'Please offer a short message to send to '+word.value);
+	  return;
       }
     }
     console.log('Couldnt find the user, will solict again...');
@@ -798,15 +809,17 @@ function handleMessages(self, user, word) {
 function handleSetup(self) {
       if (!self.attributes.setupState) 
         self.attributes.setupState = "start";
+    console.log('handleSetup: setupState:'+self.attributes.setupState);
       if (self.attributes.setupState == 'start') {
+	  console.log('Starting device setup...');
         self.attributes.setupState = 'getDeviceID';
-        self.emit(':elicitSlot',"RandomWordSlot",
+        self.emit(':elicitSlot',"NumberSlot",
             "Welcome to setup. What is your temporary device I.D.?",
             "Please say your account number.");
       }
       else
       if (self.attributes.setupState == 'getDeviceID') {
-          self.attributes.setupDeviceID = getRealSlotValue(self, 'RandomWordSlot').value;
+          self.attributes.setupDeviceID = getRealSlotValue(self, 'NumberSlot').value;
           console.log('Verifying temporary Device ID:'+self.attributes.setupDeviceID);
           findUserByDeviceID(self, self.attributes.setupDeviceID,(self2, err, data) => {
             if (err) {
@@ -885,12 +898,10 @@ const handlers = {
           console.log('ATTENTION: InteractionIntent is assuming a yes/yeah/okay automatically');
           word.value = "yes";
       }
-      
+
       // The 'Start' state means we're either just-starting a session OR we've completed 
       // some tasks and look for more things to do.  Find the next thing to do or say goodbye.
       if (this.attributes.state == 'Start') {
-        if (!this.attributes.skipSendMessage)
-          return handleSendMessage(this, user, word);
         if (user.interactions.messages && user.interactions.messages.length && !this.attributes.skipMessages)   
           return handleMessages(this, user, word);
         if (user.core.medications && user.core.medications.length && !this.attributes.skipMeds)   

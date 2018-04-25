@@ -24,34 +24,31 @@
                         }
                     ],
                     "samples": [
-                        "alright",
-                        "yeah",
-                        "okay",
-                        "please",
+                        "yep",
                         "yes",
-                        "yes i am",
-                        "pizza {RandomWordSlot}"
+                        "okay",
+                        "yeah",
+                        "alright",
+                        "{RandomWordSlot}"
                     ]
                 },
                 {
                     "name": "SetupIntent",
                     "slots": [
                         {
-                            "name": "RandomWordSlot",
-                            "type": "RandomWordSlot_Type"
+                            "name": "NumberSlot",
+                            "type": "AMAZON.NUMBER"
                         }
                     ],
                     "samples": [
-                        "apple betty",
+                        "setup",
                         "can figure",
-                        "set up",
+                        "set up {NumberSlot}",
                         "con figure",
                         "configure this now",
                         "configure now",
                         "configure",
-                        "setup now",
-                        "pizza pizza {RandomWordSlot}",
-                        "setup"
+                        "setup now"
                     ]
                 },
                 {
@@ -77,27 +74,22 @@
                     "values": [
                         {
                             "name": {
-                                "value": "five seven six eight"
+                                "value": "zebra grass hay roots barely dirt mud ocean water ocean sea fall"
                             }
                         },
                         {
                             "name": {
-                                "value": "5 6 7 8"
+                                "value": "zoo kitten ape beast"
                             }
                         },
                         {
                             "name": {
-                                "value": "apple pizza plumb sauce"
+                                "value": "pices zebra aligator"
                             }
                         },
                         {
                             "name": {
-                                "value": "apple pizza plumb"
-                            }
-                        },
-                        {
-                            "name": {
-                                "value": "apple pizza"
+                                "value": "gemini taurus "
                             }
                         },
                         {
@@ -152,13 +144,11 @@
                     "prompts": {},
                     "slots": [
                         {
-                            "name": "RandomWordSlot",
-                            "type": "RandomWordSlot_Type",
+                            "name": "NumberSlot",
+                            "type": "AMAZON.NUMBER",
                             "confirmationRequired": false,
-                            "elicitationRequired": true,
-                            "prompts": {
-                                "elicitation": "Elicit.Slot.1382951633529.1406050322007"
-                            }
+                            "elicitationRequired": false,
+                            "prompts": {}
                         }
                     ]
                 },
@@ -175,6 +165,20 @@
                             "prompts": {
                                 "elicitation": "Elicit.Slot.1057539651813.92874913839"
                             }
+                        }
+                    ]
+                },
+                {
+                    "name": "InteractionIntent",
+                    "confirmationRequired": false,
+                    "prompts": {},
+                    "slots": [
+                        {
+                            "name": "RandomWordSlot",
+                            "type": "RandomWordSlot_Type",
+                            "confirmationRequired": false,
+                            "elicitationRequired": false,
+                            "prompts": {}
                         }
                     ]
                 }
@@ -196,6 +200,15 @@
                     {
                         "type": "PlainText",
                         "value": "state your name"
+                    }
+                ]
+            },
+            {
+                "id": "Elicit.Slot.485620377673.1009662889407",
+                "variations": [
+                    {
+                        "type": "PlainText",
+                        "value": "tell me what"
                     }
                 ]
             }
