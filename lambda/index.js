@@ -169,7 +169,7 @@ let MyLife_Subjects = [
                 {
                   "question": "Will you go for a walk tomorrow?",
                   "expected": "yes,no",
-                  "responseAck":"That's great.,Oh... sorry you wont walk yourself to good health!",
+                  "responseAck":"That's great.,Oh... sorry you won't walk yourself to good health!",
                   "lastCompletedDate": null,
                 },
               ]
@@ -432,13 +432,13 @@ let RandomSideEffectStart = [
   ];
 
 function isTrue(word) {
-  if ("yes,yeah,sorta,true,i do,okay,ok,o.k.,sure".indexOf(word) != -1)
+  if ("yes,ya,yep,yeah,sorta,true,i do,okay,ok,o.k.,sure".indexOf(word) != -1)
     return true;
   return false;
 }
 
 function isFalse(word) {
-  if ("no,nope,nah,false".indexOf(word) != -1)
+  if ("no,nope,nah,false,none".indexOf(word) != -1)
     return true;
   return false;
 }
@@ -456,39 +456,6 @@ function handleReminders(self, user, word) {
       self.attributes.state = 'Start';
       self.attributes.skipReminders = true;
   }
-}
-
-function handleTodaysHealth(self, user, word) {
-  let msg="";
-  let result=word.value;
-  console.log('handleTodaysHealth: state:'+self.attributes.state);
-   
-  if (self.attributes.state == 'Start') {
-      console.log('TODAYSHEALTH start');
-      msg = "Tell me how you are feeling right now compared to yesterday. "+
-        "Would you say SAME, BETTER, or WORSE?";
-      self.attributes.state = 'TodaysHealthResponse';
-      self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+msg,"Please say SAME, BETTER or WORSE.");
-      return;
-  }
-  
-  result=result.replace('about the','');
-  result=result.replace('ok','same');
-  result=result.replace('awful','worse');
-  result=result.replace('horse','worse'); // DONT ASK!!!
-  self.attributes.state = 'Start'; 
-  if (result != 'same' && result != 'better' && result != 'worse') {
-    self.attributes.prefix += "I dont understand what you said which was: "+result+". Let's try again... ";
-    self.emit('InteractionIntent');  // Force it to come back
-    return;
-  }
-  // WARNING:  Need to update some database table with the answer
-  if (result == 'worse') 
-    self.attributes.prefix += "I'm sorry to hear you don't feel well. ";
-  self.attributes.prefix += "Thank you and I'll take note of that. ";
-  self.attributes.skipTodaysHealth = true;
-  self.emit('InteractionIntent');  // Force it to come back
-  return;
 }
 
 function handleSurveys(self, user, word) {
@@ -526,6 +493,12 @@ function handleSurveys(self, user, word) {
   // Now, see if the 'word' is in the expected list
   let i;
   let list=question.expected.split(',');
+  // Hack, let's look for certain expected words and alter miss-speaks if necessary
+  for (i=0; i < list.length; i++) {
+      if (list[i]=='same' && (word=='send' || word=='saying')) word='same';
+      if (list[i]=='worse' && (word=='horse')) word='worsee';
+  }
+   
   for (i=0; i < list.length; i++)
     if (word == list[i]) break;
   if (i >= list.length) {
@@ -550,6 +523,8 @@ function handleSurveys(self, user, word) {
       user.interactions.surveys[self.attributes.surveyIdx].lastCompletedDate = new Date();
     self.attributes.surveyIdx++;
     self.attributes.surveyQuestionIdx=0;
+    if (!user.interactions.completedSurveys)
+	user.interactions.completedSurveys = [ ];
     user.interactions.completedSurveys.push(self.attributes.surveyAnswers);
     updateSubjectDB(self, user);
     if (self.attributes.surveyIdx >= user.interactions.surveys.length) {
@@ -644,8 +619,8 @@ function handleSendMessage(self, user, word) {
       self.attributes.skipSendMessage = true;
       findUsersForSubject(self, user.ID, (self, err, data) => {
         let msg="";
-        if (!self.attributes.users) msg+="Before we go, would you like to send a message to someone in your care circle? ";
-        msg +=" You can say:, No ";
+        if (!self.attributes.users) msg+="Would you like to send a message to someone in your care circle? ";
+        msg +=" You can say, No ";
         self.attributes.users = data;
         if (err) return self.emit(':tell',"Error from database:"+err);
         if (!data.length) {
@@ -689,17 +664,31 @@ function handleSendMessage(self, user, word) {
 		self.emit('InteractionIntent');
             }
             );
-        return;
-        
-         return self.emit(':tell',"Will send to user: "+users[i].contact.firstName);
+          return;
       }
     }
     console.log('Couldnt find the user, will solict again...');
-    self.attributes.state = 'SendMessage';
+    self.attributes.state = 'Start';
     self.attributes.skipSendMessage = false;
-    self.attributes.prefix += "Sorry, I didn't understand "+word.value+". ";
+    self.attributes.prefix += "Sorry, I couldn't find the user "+word.value+". ";
     self.emit('InteractionIntent');
   }
+}
+
+function isAQuestion(msg) {
+    console.log('isAQuestion ['+msg+']');
+    msg = msg.trim().toLowerCase();
+    if (msg.slice(-1)=='?') return true;
+    if (msg.indexOf('do')!=-1) return true;
+    if (msg.indexOf('tell')!=-1) return true;
+    if (msg.indexOf('what')!=-1) return true;
+    if (msg.indexOf('how')!=-1) return true;
+    if (msg.indexOf('are')!=-1) return true;
+    if (msg.indexOf('will')!=-1) return true; 
+    if (msg.indexOf('when')!=-1) return true;
+    if (msg.indexOf('why')!=-1) return true;
+    console.log('...is false');
+    return false;
 }
 
 function handleMessages(self, user, word) {
@@ -707,14 +696,20 @@ function handleMessages(self, user, word) {
    
    if (self.attributes.state == 'Start') {
       console.log('MESSAGES start');
+       let people={};
       let from="You have messages from ";
       let max=5;
+       // Avoid stating a name multiple times
       for (let i=0; i < user.interactions.messages.length && i < max; i++) 
-        from+=user.interactions.messages[i].from + ", ";
+        people[user.interactions.messages[i].from]=true;
+      let peopleArray=Object.keys(people);
+      for (let i=0; i < peopleArray.length && i < max; i++) 
+        from+=peopleArray[i] + ", ";
       from+=" Would you like to hear them now?";
       self.attributes.state = 'MessagesResponse';
       self.attributes.msgnum = -1;
       self.attributes.skipMessages = false;
+       console.log('Asking if they want to hear their messages...');
       self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+from,"Please say yes or no.");
       return;
   }
@@ -726,38 +721,75 @@ function handleMessages(self, user, word) {
       self.attributes.skipMessages = true;
       self.attributes.prefix += "That's fine "+user.contact.firstName+", I'll save them for later; ";
       self.emit('InteractionIntent');
-      // self.emit(':elicitSlot',"RandomWordSlot",
-      //     "That's fine "+user.contact.firstName+", I'll save them for later; Ready to continue?",
-      //     "Please say yes or no.");
       return;
     }
     self.attributes.msgnum++;
     self.attributes.state = "MessagesSayMessage";
   }
   
-  if (self.attributes.state == 'MessagesSayMessage') {
-      let msg=user.interactions.messages[self.attributes.msgnum].from + " says:, "+
-              user.interactions.messages[self.attributes.msgnum].msg + ", ";
-      console.log('MESSAGE We have a message to say');
-      // Determine if this is the LAST message or there are more to go
-      if (self.attributes.msgnum >= user.interactions.messages.length - 1) {
-        console.log('MESSAGES Stating the LAST message to the user.');
-        self.attributes.state = "Start";
-        user.interactions.messages = [];
-        updateSubjectDB(self, user);
-        msg += "That's all your messages. Ready to continue?";
-        self.attributes.skipMessages = false;
-        self.attributes.prefix += msg;
-        self.emit('InteractionIntent');
-        //self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+msg,"Please say yes or no.");
-        return;
-      }
-      msg+="Would you like to hear the next one?";
-      console.log('MESSAGES Stating the next message to user.');
-      self.attributes.state = "MessagesResponse";
-      self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+msg,"Please say yes or no.");
-      return;
-  }
+    if (self.attributes.state == 'MessagesGetReply') {
+	console.log('Using reply of:'+word.value+' .. sending SMS...');
+        request.post("https://api.twilio.com/2010-04-01/Accounts/AC6203fa66f81b40708bbc4810c28fe049/Messages",
+		     { 
+			 body: "&From=+16179968873&To="+
+			     user.interactions.messages[self.attributes.msgnum].userPhone+
+			     ",&Body="+word.value,
+			 headers: {'content-type' : 'application/x-www-form-urlencoded'},
+			 auth: {
+			     'user': 'AC6203fa66f81b40708bbc4810c28fe049',
+			     'pass': '6866b679dd68e09efb537d43cc5f6dba'
+			 }
+		     },
+		     (err, resp, body) => {
+			 console.log('Result of sending sms:',err);
+			 if (err) self.attributes.prefix += "Message failed:"+err+" ";
+			 else self.attributes.prefix+="Message sent. ";
+			 self.emit('InteractionIntent');
+		     }
+		    );
+	self.attributes.state = 'MessagesSayMessage';
+	self.attributes.msgreplied = true;
+	return;
+    }
+
+    if (self.attributes.state == 'MessagesSayMessage') {
+	console.log('In SayMessage...idx:'+self.attributes.msgnum);
+	let msg="";
+	if (self.attributes.msgreplied) 
+	    self.attributes.msgreplied=false;
+	else {
+	    msg=user.interactions.messages[self.attributes.msgnum].from + " says:, "+
+		user.interactions.messages[self.attributes.msgnum].msg + ", ";
+	    console.log('MESSAGE We have a message to say');
+	    if (isAQuestion(user.interactions.messages[self.attributes.msgnum].msg) &&
+	       user.interactions.messages[self.attributes.msgnum].userPhone) {
+		console.log('The message turns out to be a question, so solicit an answer');
+		self.attributes.state = 'MessagesGetReply';
+		self.emit(':elicitSlot','RandomWordSlot',
+			  getPrefix(self)+msg,
+			  "Please answer the question with a very short phrase or word.");
+		return;
+	    }
+	}
+	// Determine if this is the LAST message or there are more to go
+	if (self.attributes.msgnum >= user.interactions.messages.length - 1) {
+            console.log('MESSAGES Stating the LAST message to the user.');
+            self.attributes.state = "Start";
+            user.interactions.messages = [];
+            updateSubjectDB(self, user);
+            msg += "That's all your messages. ";
+            self.attributes.skipMessages = false;
+            self.attributes.prefix += msg;
+            self.emit('InteractionIntent');
+            return;
+	}
+	msg+="Would you like to hear the next one?";
+	console.log('MESSAGES Stating the next message to user.');
+	self.attributes.state = "MessagesResponse";
+	console.log('Sending msg:'+msg);
+	self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+msg,"Please say yes or no.");
+	return;
+    }
   console.log('MESSAGES unknown situation!');
   self.emit(':tell',"Messages have an unknown situation, state is "+self.attributes.state);
   return;
@@ -867,6 +899,8 @@ const handlers = {
           return handleSurveys(this, user, word);
         if (user.interactions.reminders && user.interactions.reminders.selections && user.interactions.reminders.selections.length && !this.attributes.skipReminders)   
           handleReminders(this, user, word);  // DONT return; this sets up the 'prefix' attribute, or not
+        if (!this.attributes.skipSendMessage)
+          return handleSendMessage(this, user, word);
       }
       
       if (this.attributes.state.startsWith('SendMessage')) return handleSendMessage(this, user, word);

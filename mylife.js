@@ -4,7 +4,7 @@ let region=    {
             accessKeyId: 'AKIAJGWD2X3CMS3BKLRQ',
             secretAccessKey: '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'};
 
-  let docClient = new AWS.DynamoDB.DocumentClient(region);
+
 /*
   let params = {
     TableName : "MyLife_Subjects",
@@ -48,15 +48,121 @@ const app = express();
 const bodyParser = require('body-parser');
 
 app.use(bodyParser.urlencoded({extended:false}));
+app.use(bodyParser.json());
+
+function findUserByPhone(phone, nextFunction) {
+  let docClient = new AWS.DynamoDB.DocumentClient(region);
+  console.log('findUserByPhone: ',phone);
+
+  console.log('reading items from Users DynamoDB table');
+  const params = {
+        TableName: 'MyLife_Users',
+        Key: {"phone":phone},
+        ConsistentRead: false,
+        ReturnConsumedCapacity: "TOTAL"
+  };
+  console.log('scanning with params:',params);
+  docClient.get(params, (err, data) => {
+        if (err) {
+            console.error("Unable to read item. Error JSON:", err);
+        } else {
+//            console.log("scan succeeded: data:");
+//            console.log(data);
+        }
+        nextFunction(err, data.Item);
+    });  
+
+  return null;
+}
+
+function findSubjectAttributeOnly(ID, attribute, nextFunction) {
+  let docClient = new AWS.DynamoDB.DocumentClient(region);
+  console.log('findSubjectAttributeOnly: ',ID);
+
+  console.log('reading items from Subjects DynamoDB table');
+  const params = {
+        TableName: 'MyLife_Subjects',
+        Key: {"ID":ID},
+//        AttributesToGet: [attribute.split('.')[0]],
+        ProjectionExpression: attribute,
+        ConsistentRead: false,
+        ReturnConsumedCapacity: "TOTAL"
+  };
+  console.log('scanning with params:',params);
+  docClient.get(params, (err, data) => {
+        if (err) {
+            console.error("Unable to read item. Error JSON:", err);
+        } else {
+            console.log("scan succeeded: data:");
+            console.log(data);
+        }
+        nextFunction(err, data.Item);
+    });  
+
+  return null;
+}
+
+function updateSubjectAttributeOnly(ID, data, attribute, nextFunction) {
+  let docClient = new AWS.DynamoDB.DocumentClient(region);
+  console.log('findSubjectAttributeOnly: ',ID);
+
+  console.log('reading items from Subjects DynamoDB table');
+  const params = {
+        TableName: 'MyLife_Subjects',
+        Key: {"ID":ID},
+        UpdateExpression: "set "+attribute+" = :r",
+        ExpressionAttributeValues: { ":r":data},
+        ReturnConsumedCapacity: "TOTAL"
+  };
+  console.log('scanning with params:',params);
+  docClient.update(params, (err, data) => {
+        if (err) {
+            console.error("Unable to read item. Error JSON:", err);
+        } else {
+            console.log("scan succeeded: data:");
+            console.log(data);
+        }
+        nextFunction(err, data.Item);
+    });  
+
+  return null;
+}
 
 app.post('/sms', (req, res) => {
-    console.log('Hey, we got some message! req:',req.body);
-  const twiml = new MessagingResponse();
+    console.log('Hey, we got some message! From:',req.body.From);
+    findUserByPhone(req.body.From, function (err, user) {
+	if (err) console.log('Error reading Users table:',err);
+	else 
+	if (!user) console.log('No users matching the incoming phone number '+req.body.From);
+	else {
+	    console.log('Will search for user: '+user.subjectID);
+	    findSubjectAttributeOnly(user.subjectID,"interactions.messages",(err,subject)=>{
+		console.log("find: got: data:",subject);
+		subject.interactions.messages.push(
+		    {
+			from: user.contact.firstName,
+			userPhone: user.phone,
+			msg: req.body.Body
+		    });
+		updateSubjectAttributeOnly(user.subjectID, 
+					   subject.interactions.messages, 
+					   "interactions.messages", (err,data) => {
+		    console.log('result of put err:',err,' data:',data);
+		})
+	    });
+	}
+    });
 
-  twiml.message('The Robots are coming chris! Head for the hills!');
+    res.writeHead(200, {'Content-Type': 'text/xml'});
+    res.end();
+/*
+    const twiml = new MessagingResponse();
 
-  res.writeHead(200, {'Content-Type': 'text/xml'});
-  res.end(twiml.toString());
+    twiml.message('The Robots are coming chris! Head for the hills!');
+
+    res.writeHead(200, {'Content-Type': 'text/xml'});
+    res.end(twiml.toString());
+*/
 });
 
 app.get('/', (req, res) => {
@@ -67,6 +173,7 @@ app.get('/', (req, res) => {
 });
 
 const port=80;
+console.log("Starting the web server...");
 http.createServer(app).listen(port, () => {
-  console.log(`Express server listening on port {port}`);
+  console.log('Express server listening on port '+port);
 });
