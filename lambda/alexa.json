@@ -45,26 +45,20 @@
                         "can figure",
                         "set up {NumberSlot}",
                         "con figure",
-                        "configure this now",
-                        "configure now",
                         "configure",
                         "setup now"
                     ]
                 },
                 {
-                    "name": "DemoIntent",
+                    "name": "ActivateIntent",
                     "slots": [
                         {
-                            "name": "UserFirstNameSlot",
-                            "type": "UserFirstNameSlot_Type",
-                            "samples": [
-                                "joe"
-                            ]
+                            "name": "RandomWordSlot",
+                            "type": "RandomWordSlot_Type"
                         }
                     ],
                     "samples": [
-                        "demo {UserFirstNameSlot}",
-                        "start demo  {UserFirstNameSlot}"
+                        "activate {RandomWordSlot}"
                     ]
                 }
             ],
@@ -147,38 +141,10 @@
                             "name": "NumberSlot",
                             "type": "AMAZON.NUMBER",
                             "confirmationRequired": false,
-                            "elicitationRequired": false,
-                            "prompts": {}
-                        }
-                    ]
-                },
-                {
-                    "name": "DemoIntent",
-                    "confirmationRequired": false,
-                    "prompts": {},
-                    "slots": [
-                        {
-                            "name": "UserFirstNameSlot",
-                            "type": "UserFirstNameSlot_Type",
-                            "confirmationRequired": false,
                             "elicitationRequired": true,
                             "prompts": {
-                                "elicitation": "Elicit.Slot.1057539651813.92874913839"
+                                "elicitation": "Elicit.Slot.966635987374.355964814756"
                             }
-                        }
-                    ]
-                },
-                {
-                    "name": "InteractionIntent",
-                    "confirmationRequired": false,
-                    "prompts": {},
-                    "slots": [
-                        {
-                            "name": "RandomWordSlot",
-                            "type": "RandomWordSlot_Type",
-                            "confirmationRequired": false,
-                            "elicitationRequired": false,
-                            "prompts": {}
                         }
                     ]
                 }
@@ -186,29 +152,11 @@
         },
         "prompts": [
             {
-                "id": "Elicit.Slot.1382951633529.1406050322007",
+                "id": "Elicit.Slot.966635987374.355964814756",
                 "variations": [
                     {
                         "type": "PlainText",
-                        "value": "what is your random word"
-                    }
-                ]
-            },
-            {
-                "id": "Elicit.Slot.1057539651813.92874913839",
-                "variations": [
-                    {
-                        "type": "PlainText",
-                        "value": "state your name"
-                    }
-                ]
-            },
-            {
-                "id": "Elicit.Slot.485620377673.1009662889407",
-                "variations": [
-                    {
-                        "type": "PlainText",
-                        "value": "tell me what"
+                        "value": "Need your tempor ID"
                     }
                 ]
             }
