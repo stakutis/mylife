@@ -20,7 +20,7 @@
                     "slots": [
                         {
                             "name": "RandomWordSlot",
-                            "type": "RandomWordSlot_Type"
+                            "type": "WordSlot_Type"
                         }
                     ],
                     "samples": [
@@ -29,7 +29,7 @@
                         "okay",
                         "yeah",
                         "alright",
-                        "{RandomWordSlot}"
+                        "pizza {RandomWordSlot}"
                     ]
                 },
                 {
@@ -54,11 +54,23 @@
                     "slots": [
                         {
                             "name": "RandomWordSlot",
-                            "type": "RandomWordSlot_Type"
+                            "type": "WordSlot_Type"
                         }
                     ],
                     "samples": [
                         "activate {RandomWordSlot}"
+                    ]
+                },
+                {
+                    "name": "TestIntent",
+                    "slots": [
+                        {
+                            "name": "WordSlot",
+                            "type": "WordSlot_Type"
+                        }
+                    ],
+                    "samples": [
+                        "test this {WordSlot}"
                     ]
                 }
             ],
@@ -68,22 +80,37 @@
                     "values": [
                         {
                             "name": {
-                                "value": "zebra grass hay roots barely dirt mud ocean water ocean sea fall"
+                                "value": "five seven six eight"
                             }
                         },
                         {
                             "name": {
-                                "value": "zoo kitten ape beast"
+                                "value": "nine ten twelve sixteen"
                             }
                         },
                         {
                             "name": {
-                                "value": "pices zebra aligator"
+                                "value": "thirteen five eleven twenty"
                             }
                         },
                         {
                             "name": {
-                                "value": "gemini taurus "
+                                "value": "5 6 7 8"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "apple pizza plumb sauce"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "apple pizza plumb"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "apple pizza"
                             }
                         },
                         {
@@ -104,26 +131,196 @@
                     ]
                 },
                 {
-                    "name": "UserFirstNameSlot_Type",
+                    "name": "WordSlot_Type",
                     "values": [
                         {
                             "name": {
-                                "value": "one two three"
+                                "value": "the show could have used better dialog and I think the characters were marginal at best"
                             }
                         },
                         {
                             "name": {
-                                "value": "pizza sauce"
+                                "value": "moderate"
                             }
                         },
                         {
                             "name": {
-                                "value": "joe"
+                                "value": "extreme"
                             }
                         },
                         {
                             "name": {
-                                "value": "sally"
+                                "value": "mild"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "worse"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "better"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "same"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "the weather is terrible"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "the food is terrible"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "i feel great"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "i feel good"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "i feel fine"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "i took my medicine"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "i took my pills"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "i wont forget"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "i will"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "it was so good to see you"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "you looked great"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "i miss you"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "i love you"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "it was great seeing you"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "thank you for lunch"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "good luck"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "happy birthday"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "thank you for reminding me"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "i left it in the car"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "call me today"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "call me tomorrow"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "call me when you can"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "call me"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "no"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "yes"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "tomorrow the weather wont be good so stay inside"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "they played a fantastic game today"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "the beach is fun"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "thanx"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "thank you"
+                            }
+                        },
+                        {
+                            "name": {
+                                "value": "good"
                             }
                         }
                     ]
@@ -147,6 +344,36 @@
                             }
                         }
                     ]
+                },
+                {
+                    "name": "InteractionIntent",
+                    "confirmationRequired": false,
+                    "prompts": {},
+                    "slots": [
+                        {
+                            "name": "RandomWordSlot",
+                            "type": "WordSlot_Type",
+                            "confirmationRequired": false,
+                            "elicitationRequired": false,
+                            "prompts": {}
+                        }
+                    ]
+                },
+                {
+                    "name": "TestIntent",
+                    "confirmationRequired": false,
+                    "prompts": {},
+                    "slots": [
+                        {
+                            "name": "WordSlot",
+                            "type": "WordSlot_Type",
+                            "confirmationRequired": false,
+                            "elicitationRequired": true,
+                            "prompts": {
+                                "elicitation": "Elicit.Slot.926245943953.578278679261"
+                            }
+                        }
+                    ]
                 }
             ]
         },
@@ -157,6 +384,24 @@
                     {
                         "type": "PlainText",
                         "value": "Need your tempor ID"
+                    }
+                ]
+            },
+            {
+                "id": "Elicit.Slot.549465285120.1027538104764",
+                "variations": [
+                    {
+                        "type": "PlainText",
+                        "value": "what is your word"
+                    }
+                ]
+            },
+            {
+                "id": "Elicit.Slot.926245943953.578278679261",
+                "variations": [
+                    {
+                        "type": "PlainText",
+                        "value": "your word is?"
                     }
                 ]
             }

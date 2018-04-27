@@ -365,6 +365,11 @@ function getRealSlotValue(self, whichSlot, defaultValue) {
             break;
          }
          
+	// STAKUTIS Friday 4/28/2018; Below. This seems always to be the right choice
+        ret.value = slots[whichSlot].value;
+        break;
+
+
          // Ok, either we have something like an AMAZON.*
          // in which case we dont have resolutions BUT we have
          // a real top-level value OR we have resolutions
@@ -398,7 +403,7 @@ function getRealSlotValue(self, whichSlot, defaultValue) {
         // We're here because we have a slot, it has resolutions, and is is ER_SUCCESS
         var valueRecord=slots[whichSlot].resolutions.resolutionsPerAuthority[0].values[0];
         //console.log('We have resolutions AND ER_SUCCESS, valueRecord:',valueRecord);
-        ret.value = valueRecord.value.name;  // shouldn't this be .value??
+        ret.value = valueRecord.value.name; 
         break;
     }
     console.log('getRealSlotValue of '+whichSlot+' returning:');
@@ -427,7 +432,9 @@ function dumpStuff(intent, self) {
 
 const RandomGetStartedMessages=[
     "We're off to the races!",
-    "This should be fun today.",
+    "Enjoy the rest of the day.",
+    "Remember, life is good.",
+    "This was fun.",
     "Today is a good day.",
     "Thanx for using this tool."
     ];
@@ -462,7 +469,7 @@ function isTrue(word) {
 }
 
 function isFalse(word) {
-  if ("no,nope,nah,false,none".indexOf(word.toLowerCase()) != -1)
+  if (word.length > 1 && "no,nope,nah,false,none".indexOf(word.toLowerCase()) != -1)
     return true;
   return false;
 }
@@ -663,81 +670,103 @@ function handleMeds(self, subject, word) {
 
 
 function handleSendMessage(self, subject, word) {
-   console.log('handleSendMessage: state:'+self.attributes.state);
+    console.log('handleSendMessage: state:'+self.attributes.state);
 
-   if (self.attributes.state == 'Start') {
-      console.log('*************** SendMessage start; get user-list of this patient/subject ************');
-      self.attributes.skipSendMessage = true;
-      findUsersForSubject(self, subject.ID, (self, err, data) => {
-        let msg="";
-        if (!self.attributes.users) msg+="Would you like to send a message to someone in your care circle? ";
-        msg +=" You can say, No ";
-        self.attributes.users = data;
-        if (err) return self.emit(':tell',"Error from database:"+err);
-        if (!data.length) {
-          // no users found so dont bother the patient
-          return self.emit('InteractionIntent');
-        }
-        for (let i=0; i < data.length; i++) 
-          msg+=", or "+data[i].contact.firstName;
-        self.attributes.state = 'SendMessageGetUser';
-	  console.log("     Saying:"+self.attributes.prefix+msg);
-        self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+msg,msg);
-      });
-      return;
-  }
-
-  if (self.attributes.state=="SendMessageGetMessage") {
-      self.attributes.state = 'Start';
-	  console.log('will send to user: ',self.attributes.sendTo,' msg:',word.value);
-          request.post("https://api.twilio.com/2010-04-01/Accounts/AC6203fa66f81b40708bbc4810c28fe049/Messages",
-            { 
-		body: "&From=+16179968873&To="+self.attributes.sendTo+",&Body="+subject.contact.firstName+" says: "+word.value,
-		headers: {'content-type' : 'application/x-www-form-urlencoded'},
-	       auth: {
-		   'user': 'AC6203fa66f81b40708bbc4810c28fe049',
-		   'pass': '6866b679dd68e09efb537d43cc5f6dba'
-	       }
-	    },
-            (err, resp, body) => {
-		if (err) self.attributes.prefix += "Message failed:"+err+" ";
-		else self.attributes.prefix+="Message sent. ";
-		console.log("     Saying:"+self.attributes.prefix);
-		self.emit('InteractionIntent');
+    if (self.attributes.state == 'Start') {
+	console.log('*************** SendMessage start; get user-list of this patient/subject ************');
+	self.attributes.skipSendMessage = true;
+	findUsersForSubject(self, subject.ID, (self, err, data) => {
+            let msg="";
+            if (!self.attributes.users) msg+="Would you like to send a message to someone in your care circle? ";
+	    if (self.attributes.secondTry) 
+		self.attributes.prefix += 'Hmmm. Sometimes names are hard for me to understand. Instead, please say one of the following numbers, or NO.';
+            else msg +=" You can say, No ";
+            self.attributes.users = data;
+            if (err) return self.emit(':tell',"Error from database:"+err);
+            if (!data.length) {
+		// no users found so dont bother the patient
+		return self.emit('InteractionIntent');
             }
-            );
-          return;
-      }
-  
-  if (self.attributes.state == 'SendMessageGetUser') {
-    console.log('SendMessage: GetUser, got word:',word.value);
-    self.attributes.state = 'Start';
-    if (isFalse(word.value)) {
-      console.log('Got a NO response');
-      return self.emit('InteractionIntent');
+            for (let i=0; i < data.length; i++) {
+		if (self.attributes.secondTry)
+		    msg += ', Say '+(i+1)+' for '+data[i].contact.firstName;
+		else
+		    msg+=", or "+data[i].contact.firstName;
+	    }
+            self.attributes.state = 'SendMessageGetUser';
+	    console.log("     Saying:"+self.attributes.prefix+msg);
+            self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+msg,msg);
+	});
+	return;
+    }
+
+    if (self.attributes.state=="SendMessageGetMessage") {
+	self.attributes.state = 'Start';
+	console.log('will send to user: ',self.attributes.sendTo,' msg:',word.value);
+        request.post("https://api.twilio.com/2010-04-01/Accounts/AC6203fa66f81b40708bbc4810c28fe049/Messages",
+		     { 
+			 body: "&From=+16179968873&To="+self.attributes.sendTo+",&Body="+subject.contact.firstName+" says: "+word.value,
+			 headers: {'content-type' : 'application/x-www-form-urlencoded'},
+			 auth: {
+			     'user': 'AC6203fa66f81b40708bbc4810c28fe049',
+			     'pass': '6866b679dd68e09efb537d43cc5f6dba'
+			 }
+		     },
+		     (err, resp, body) => {
+			 if (err) self.attributes.prefix += "Message failed:"+err+" ";
+			 else self.attributes.prefix+="Message sent. ";
+			 console.log("     Saying:"+self.attributes.prefix);
+			 self.emit('InteractionIntent');
+		     }
+		    );
+        return;
     }
     
-    self.attributes.state = 'Start';
-    // Try to find the user in the list
-    let users = self.attributes.users;
-    for (let i=0; i < users.length; i++) {
-      if (users[i].contact.firstName.toLowerCase() == word.value) {
-	  console.log('Asking for the message to send...');
-	  self.attributes.sendTo=users[i].phone;
-	  self.attributes.state="SendMessageGetMessage";
-	  console.log("     Asking for SMS message");
-	  self.emit(':elicitSlot','RandomWordSlot',
-		    getPrefix(self)+' Tell me the message; keep it short please.',
-		    'Please offer a short message to send to '+word.value);
-	  return;
-      }
+    if (self.attributes.state == 'SendMessageGetUser') {
+	console.log('SendMessage: GetUser, got word:',word.value);
+	self.attributes.state = 'Start';
+	if (isFalse(word.value)) {
+	    console.log('Got a NO response');
+	    return self.emit('InteractionIntent');
+	}
+	
+	self.attributes.state = 'Start';
+	//
+	// Try to find the user in the list
+	//
+	let users = self.attributes.users;
+	let idx = -1;
+	if (self.attributes.secondTry) {
+	    idx=parseInt(word.value);
+	    console.log('secondTry: Converting '+word.value+' to '+idx);
+	    if (!idx) idx= -1;
+	    else idx--;
+	}
+	else 
+	    for (idx=0; idx < users.length; idx++)
+		if (users[idx].contact.firstName.toLowerCase() == word.value) 
+		    break;
+
+	if (idx<0 || idx >= users.length) {
+	    console.log('Couldnt find the user, will solict again...');
+	    self.attributes.state = 'Start';
+	    self.attributes.skipSendMessage = false;
+	    self.attributes.secondTry = true;
+	    //    self.attributes.prefix += "Sorry, I couldn't find the user "+word.value+". ";
+	    self.emit('InteractionIntent');
+	    return;
+	}
+	else {
+	    console.log('Asking for the message to send...');
+	    self.attributes.sendTo=users[idx].phone;
+	    self.attributes.state="SendMessageGetMessage";
+	    console.log("     Asking for SMS message");
+	    self.emit(':elicitSlot','RandomWordSlot',
+		      getPrefix(self)+' Tell me the message for '+users[idx].contact.firstName+'; keep it short please.',
+		      'Please offer a short message to send to '+word.value);
+	    return;
+	}
     }
-    console.log('Couldnt find the user, will solict again...');
-    self.attributes.state = 'Start';
-    self.attributes.skipSendMessage = false;
-    self.attributes.prefix += "Sorry, I couldn't find the user "+word.value+". ";
-    self.emit('InteractionIntent');
-  }
 }
 
 function isAQuestion(msg) {
@@ -845,7 +874,7 @@ function handleMessages(self, subject, word) {
 				       subject.interactions.messages, 
 				       "interactions.messages",(self,err,data) => {
 					   if (err) err+="ERROR writing database! ";
-					   msg += "That's all your messages. ";
+					   msg += "That's all your messages, ... ... ";
 					   self.attributes.skipMessages = false;
 					   self.attributes.prefix += msg;
 					   self.emit('InteractionIntent');
@@ -965,7 +994,7 @@ const handlers = {
             return;
           }
           if (!data || !data.length) this.emit(':tell',"I'm sorry, your Alexa device is not set up yet. " +
-              "Please ask your caregiver to say... Alexa ... ask My Life, configure now... ");
+              "Please ask your caregiver to say... Alexa ... tell My Life, configure now... ");
           else {
             self.attributes.deviceId = self.event.context.System.device.deviceId;
             console.log("Retievd subject:",data[0]);
@@ -987,10 +1016,21 @@ const handlers = {
       dumpStuff('SetupIntent',this);  
       handleSetup(this);
     },
+    'TestIntent': function () {
+      let word=getRealSlotValue(this,'WordSlot');
+	console.log('got word:'+word.value);
+	this.emit(':elicitSlot','WordSlot',"Got: "+word.value,"ha ha");
+	return;
+	},
     'InteractionIntent': function () {
       let word, subject;
       dumpStuff('InteractionIntent',this);
       word=getRealSlotValue(this,'RandomWordSlot');
+/*
+	console.log('got word:'+word.value);
+	this.emit(':elicitSlot','RandomWordSlot',"Just testing WordSlot, go again! I got:"+word.value,"ha ha");
+	return;
+*/
       subject=this.attributes.subject;
       if (!subject) {
         this.emit(':tell',"Oh dear, something went wrong and I can't find your device in our database.");
@@ -1008,6 +1048,10 @@ const handlers = {
       // The 'Start' state means we're either just-starting a session OR we've completed 
       // some tasks and look for more things to do.  Find the next thing to do or say goodbye.
       if (this.attributes.state == 'Start') {
+/*
+        if (!this.attributes.skipSendMessage)
+          return handleSendMessage(this, subject, word);
+*/
         if (subject.interactions.messages && subject.interactions.messages.length && !this.attributes.skipMessages)   
           return handleMessages(this, subject, word);
         if (subject.core.medications && subject.core.medications.length && !this.attributes.skipMeds)   
@@ -1064,4 +1108,8 @@ exports.handler = function (event, context, callback) {
     alexa.execute();
 };
 
+let file='./test.js';
+const test =require(file);
+
+console.log("test:",test);
 
