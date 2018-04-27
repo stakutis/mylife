@@ -474,6 +474,13 @@ function isFalse(word) {
   return false;
 }
 
+function expect2Str(expect) {
+    // remove bars
+    let words = expect.split(',');
+    for (let i=0; i<words.length; i++) words[i]=words[i].split('|')[0];
+    return words.join(", ");
+}
+
 function handleReminders(self, subject, word) {
   let msg="";
   console.log('handleReminders: state:'+self.attributes.state);
@@ -490,6 +497,135 @@ function handleReminders(self, subject, word) {
 }
 
 function handleSurveys(self, subject, word) {
+    let msg="";
+    let survey,question;
+    console.log('handleSurveys: state:'+self.attributes.state+' surveyIdx:'+self.attributes.surveyIdx+' qIdx:'+self.attributes.surveyQuestionIdx);
+    word = word.value.toLowerCase().trim();
+
+    if (self.attributes.state == 'Start') {
+	console.log('*************** Surveys start **************');
+	self.attributes.surveyQuestionIdx = 0;
+	self.attributes.surveyIdx = 0;
+	self.attributes.state = 'SurveyQuestion';
+    }
+
+    // Convenience variables...
+    survey = subject.interactions.surveys[self.attributes.surveyIdx];
+    question = survey.questions[self.attributes.surveyQuestionIdx];
+    
+    if (self.attributes.state == 'SurveyQuestion') {
+	if (self.attributes.surveyQuestionIdx == 0) {
+	    // build a new output record
+	    self.attributes.surveyAnswers = { answers:[], survey:survey.name} ;
+	    if (survey.startingMessage && !survey.announcedStartingMessage) {
+		self.attributes.prefix += survey.startingMessage+', ... ';
+		survey.announcedStartingMessage = true;
+	    }
+	}  
+	self.attributes.state = 'SurveyAnswer';
+	msg = question.question;
+	console.log('     handleSurvey: Asking: '+msg);
+	self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+msg, msg);
+	return;
+    }
+    
+    /* Must be in 'answer' state */
+
+    /* Setup the 'expect' variable */
+    let expect = survey.defaultExpect;
+    if (!expect) expect = question.expect;
+    if (!expect) expect = "";  // means take whatever they say
+
+    // See if the expected responses are yes/no type and then allow flexibility
+    if (expect == "yes,no" || expect == "yes, no") {
+	if (isTrue(word)) word='yes';
+	else if (isFalse(word)) word='no';
+    }
+    
+    // Now, see if the 'word' is in the expected list
+    let i;
+    let list=expect.split(',');
+    for (i=0; i < list.length; i++) {
+	list[i]=list[i].trim();
+	if (list[i].indexOf(word) != -1) break;
+    }
+    if (i >= list.length) {
+	self.attributes.prefix += "I'm sorry, your response didn't match what I was expecting,"+
+	    " I was expecting one of, "+expect2Str(expect)+"., ";
+	self.attributes.state = 'SurveyQuestion';  // Completely re-ask the question
+	console.log("    asking:"+self.attributes.prefix);
+	self.emit("InteractionIntent");
+	return;
+    }
+    
+    console.log('Got an expected answer');
+    self.attributes.surveyAnswers.answers.push(list[i]);
+    
+    // Let's now setup an Acknowledgement for the user
+    let ack = survey.defaultAck;
+    if (!ack) ack = question.responseAck;
+    if (ack)
+	try { self.attributes.prefix += ack.split(',')[i]+', '; 
+	      console.log('Providing ack:'+self.attributes.prefix);
+	    } catch (e) {
+		console.log('Dang it, couldnt get the ack, e:',e);
+	    }
+
+    self.attributes.surveyQuestionIdx++;
+    /*** See if we finished THIS survey ***/
+    if (self.attributes.surveyQuestionIdx >= 
+	subject.interactions.surveys[self.attributes.surveyIdx].questions.length) {
+	console.log("Finished this questionairre");
+	self.attributes.surveyAnswers.completedDate = 
+	    survey.lastCompletedDate = new Date().toISOString();
+	self.attributes.surveyIdx++;
+	self.attributes.surveyQuestionIdx=0;
+	if (!subject.interactions.completedSurveys)
+	    subject.interactions.completedSurveys = [ ];
+	subject.interactions.completedSurveys.push(self.attributes.surveyAnswers);
+	updateSubjectAttributeOnly(self, 
+				   subject.ID,
+				   subject.interactions.completedSurveys,
+				   "interactions.completedSurveys", (self, err, data) => {
+				       if (err) self.attributes.prefix += "ERROR saving to database! ";
+
+				       /** Invoke library is specified **/
+				       if (survey.library) {
+					   if (survey.library.charAt(0) != '/' )
+					       survey.library = "./"+survey.library;
+					   let library=require(survey.library);
+					   console.log("Got library:",library);
+					   library.handleCompletion(self, subject, survey, self.attributes.surveyAnswers);
+				       }
+
+				       /*** Lets see if we're all done with all surveys ***/
+				       if (self.attributes.surveyIdx >= subject.interactions.surveys.length) {
+					   console.log("Finished all surveys! Current completed is:",subject.interactions.completedSurveys);
+					   self.attributes.state = 'Start';
+					   self.attributes.prefix += "Completed all the surveys! ";
+					   self.attributes.skipSurveys = true;
+					   console.log("     Saying:"+self.attributes.prefix);
+					   self.emit("InteractionIntent");
+					   return;
+				       }
+
+				       /*** Go on to the next survey **/
+				       self.attributes.prefix += "You finished this survey. Let's start another one. ";
+				       console.log('About to start next survey, idx:'+self.attributes.surveyIdx);
+				       self.attributes.state = 'SurveyQuestion';
+				       console.log("     Saying:"+self.attributes.prefix);
+				       self.emit('InteractionIntent');  
+				       return;
+				   });
+	return;
+    }
+
+    self.attributes.state = 'SurveyQuestion';
+    console.log("     Saying:"+self.attributes.prefix);
+    self.emit('InteractionIntent');  
+}
+
+function handleSurveys_SAVE(self, subject, word) {
     let msg="";
     console.log('handleSurveys: state:'+self.attributes.state+' surveyIdx:'+self.attributes.surveyIdx+' qIdx:'+self.attributes.surveyQuestionIdx);
     word = word.value.toLowerCase().trim();
@@ -943,10 +1079,21 @@ function handleSetup(self) {
 }
 
 function handleLaunch(self, subject) {
-  console.log('Launch event is asking the subject Are You Ready to kick-off the dialog');
-  self.attributes.state = "Start";
-  self.attributes.subject = subject;  // WARNING, this results in a full-copy when it comes back, NOT the reference
-  self.emit(':ask',getPrefix(self)+"..."+getRandom(RandomGetGreatingMessages)+subject.contact.firstName+'! Are you ready?');
+    console.log('Launch event is asking the subject Are You Ready to kick-off the dialog');
+    self.attributes.state = "Start";
+    self.attributes.subject = subject;  // WARNING, this results in a full-copy when it comes back, NOT the reference
+    let launchLibrary="./"+subject.libraries.launch;
+    let launch=null;
+    let launchMessage="";
+    try {
+	launch = require(launchLibrary);
+	launchMessage = launch.launchMessage;
+    } catch (e) {
+	console.log("Not able to load launch library "+launchLibrary,e);
+    }
+    self.emit(':ask',getPrefix(self)+"..."+
+	      getRandom(RandomGetGreatingMessages)+subject.contact.firstName+'! '+
+	      launchMessage+' Are you ready?');
 }
 
 function copySubject(self, copyFromID) {
@@ -1048,6 +1195,10 @@ const handlers = {
       // The 'Start' state means we're either just-starting a session OR we've completed 
       // some tasks and look for more things to do.  Find the next thing to do or say goodbye.
       if (this.attributes.state == 'Start') {
+/*
+        if (subject.interactions.surveys && subject.interactions.surveys.length && !this.attributes.skipSurveys)
+          return handleSurveys(this, subject, word);
+*/
 /*
         if (!this.attributes.skipSendMessage)
           return handleSendMessage(this, subject, word);
