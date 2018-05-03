@@ -10,197 +10,116 @@ const request = require('request');
 const APP_ID = undefined;
 
 
-const HELP_MESSAGE = 'You can say tell me a space fact, or, you can say exit... What can I help you with?';
+const HELP_MESSAGE = "Most users can simply say Alexa, Start My Life, to get going. "+
+      "That will then give you more specifics and help on how to proceed. ";
 const HELP_REPROMPT = 'What can I help you with?';
 const STOP_MESSAGE = 'Goodbye!';
 
-/* These global will later be automatically loaded-from the DynamoDB database */
-/**
- * "contact" is general contact info for any entity (cell, email, fullname)
- * "core" is general info about a human (gender, DoB, first/lastName, street, city, state, zip)
- * "frequency" Once, EachTime, Daily, TwiceWeek, Weekly, Monthly
- * **/
-
-let
-  MyLife_Organizations = [
-    {
-      "ID": "24hourscare",
-      "contact": {
-        "cell": "6177920500",
-        "email": "collins@24hourscare.com",
-        "name": "Collins Emerhi"
-      },
-      "webite": "www.24hourscare.com"
-    },
-    {
-      "ID": "ConcordSoftware",
-      "contact": {
-        "cell": "9787643488",
-        "email": "chris.stakutis@gmail.com",
-        "name": "Chris Stakutis"
-      },
-      "webite": "www.concordsoftwareandexecutiveconsulting.com"
-    }
-    ];
-    
-let MyLife_Caregivers = [
-    {
-      "ID": "3488",  /* The caregiver select because they need to remember it*/
-      "code": "3488",/* pass-code that the 'setup' uses to verify them */
-      "contact": {
-        "cell": "9787643488",
-        "email": "chris.stakutis@gmail.com",
-        "firstName": "Chris",
-        "lastName": "Stakutis"
-      }
-    },
-    {
-      "ID": "3489",  /* The caregiver select because they need to remember it*/
-      "code": "3489",/* pass-code that the 'setup' uses to verify them */
-      "contact": {
-        "cell": "9787643488",
-        "email": "chris.stakutis@gmail.com",
-        "firstName": "Chris",
-        "lastName": "Stakutis"
-      }
-    }
-  ];
-
 let MyLife_Subjects = [
-    {
-      "ID": new Date().toISOString(),  /* Index */
-      "caregiverID": "3488",           /* Index */
-      "deviceID" : null, //"amzn1.ask.device.AFPBT6VKYQO7KV6ZSFSL5P5JF2RHS47KMNJJIAXZWKXZOFSVSNJRCHQXVUSOVE7WLLH4QPHHJKBW4YZBKBJGH5OVBKKNUQP4C424UKFFTBPVZNWT4DZLECTHYYLL533XJ6K4JI473MKXMDBBG4WHNWGTVK4A",
-      "contact": {  /* These are relatively static */
-        "cell": "1112223333",
-        "email": "vin@heaven.com",
-        "firstName": "Richard",
-        "lastName": "Smith",
-        "zipcode": "01742"
-      },
-      "core": {  /* These are relatively static */
-        "DoB": "Full ISO time",
-        "gender": "M",
-        "healthConditions": [ ],  /* Diabetes, ... */
-        "medications": [
-              {
-                "name":"Aspirin",
-                "sideEffects": "Bloating, mental anquish"
-              },
-              {
-                "name":"Tylenol",
-                "sideEffects": "Mood swings, strange happiness"
-              },
-              {
-                "name":"Jelly beans",
-                "sideEffects": "Stomache ache, soreness"
-              }
-            ],
-        "interests": {
-        "hobbies": ["golf","crossword","puzzles"],
-        "religion": ["christian","catholic"],
-        "sports": {
-          "baseball": [
-            "redsox",
-            "yankees"
-          ],
-          "hockey": [
-            "bruins"
-          ]
-        }
-      }
-      },
-      "interactions" : {
-        /*
-        Their messages (always)
-        Ask about medication side effects (per freq)
-        Surveys (as-scheduled)
-        Reminders (per freq)
-        */
-        "messages": [
-          {
-            "from": "Sally",
-            "msg": "I hope you have a fantastic week!"
-          },
-          {
-            "from": "Joe",
-            "msg": "Dont forget to call Penny on her birthday this week."
-          },
-          {
-            "from": "Peter",
-            "msg": "I got an A on my math test!"
-          }
+{
+  "contact": {
+    "cell": "1112223333",
+    "email": "vin@heaven.com",
+    "firstName": "Robert",
+    "lastName": "Smith",
+    "zipcode": "01742"
+  },
+  "core": {
+    "DoB": "Full ISO time",
+    "gender": "M",
+    "healthConditions": [],
+    "interests": {
+      "hobbies": [
+        "golf",
+        "crossword",
+        "puzzles"
+      ],
+      "religion": [
+        "christian",
+        "catholic"
+      ],
+      "sports": {
+        "baseball": [
+          "redsox",
+          "yankees"
         ],
-        "sideEffects": { 
-          "frequency":"always",
-          "whichOne":"random1" /* or "all" */
-        },
-        "completedSurveys" : [ ],  // .name, response, date
-        "completedSideEffects": [ ],  // { } .date, .medication, .sideEffect
-        /**
-         * .completedDate
-         * .survey (name)
-         * .answers [" "," "... ]
-         * **/
-        "surveys" : [
-            {
-              "name" : "TodaysFeelings",
-              "frequency": "always",
-              "questions": [
-                {
-                  "question": "Tell me how you are feeling right now compared to yesterday. "+
-                              "Would you say SAME, BETTER, or WORSE?",
-                  "expected": "same,better,worse",
-                  "responseAck":"Ok.,That's great.,Oh, sorry you feel that way.",
-                  "lastCompletedDate": null,
-                },
-                {
-                  "question": "Is today rainy?",
-                  "expected": "yes,no",
-                  "responseAck":"Too bad!,That's good.",
-                  "lastCompletedDate": null,
-                },
-              ]
-            },
-            {
-              "name" : "TomorrowsFeelings",
-              "frequency": "always",
-              "questions": [
-                {
-                  "question": "Will you go for a walk tomorrow?",
-                  "expected": "yes,no",
-                  "responseAck":"That's great.,Oh... sorry you won't walk yourself to good health!",
-                  "lastCompletedDate": null,
-                },
-              ]
-            },
-          ],
-        "reminders": {
-          "frequency":"always",
-          "whichOne":"random1", /* or "all" */
-          "selections": [
-            "Dont forget to go for a walk today.",
-            "Please take your medications on schedule.",
-            "Be careful in the snow!",
-            "Be sure to eat all of your dinner.",
-            "Your family loves you; think about that."
-            ]
-        }
-      },
+        "hockey": [
+          "bruins"
+        ]
+      }
     },
-    {
-      "ID": new Date().toISOString(),
-      "caregiverID": "3488",
-      "deviceID" : null,
-      "contact": {
-        "cell": "9787643488",
-        "email": "chris.stakutis@gmail.com",
-        "firstName": "Chris",
-        "lastName": "Stakutis",
-        "zipcode": "01742"
+    "medications": [
+      {
+        "name": "Aspirin",
+        "sideEffects": "Bloating, mental anquish"
       },
-    }    
-  ];
+      {
+        "name": "Tylenol",
+        "sideEffects": "Mood swings, strange happiness"
+      },
+      {
+        "name": "Jelly beans",
+        "sideEffects": "Stomache ache, soreness"
+      }
+    ]
+  },
+  "deviceID": "null",
+  "ID": "ChrisDemo1",
+  "interactions": {
+    "completedSideEffects": [
+      {
+        "date": "2018-04-25T21:01:25.579Z",
+        "medication": "Aspirin",
+        "sideEffects": "Bloating, mental anquish"
+      }
+    ],
+    "completedSurveys": [],
+    "messages": [
+      {
+        "from": "Sally",
+        "msg": "I hope you have a fantastic week!"
+      },
+      {
+        "from": "Joe",
+        "msg": "Dont forget to call Penny on her birthday this week."
+      }
+    ],
+    "reminders": {
+      "frequency": "always",
+      "selections": [
+        "Dont forget to go for a walk today.",
+        "Please take your medications on schedule.",
+        "Be careful in the snow!",
+        "Be sure to eat all of your dinner.",
+        "Your family loves you; think about that."
+      ],
+      "whichOne": "random1"
+    },
+    "sideEffects": {
+      "frequency": "always",
+      "whichOne": "random1"
+    },
+    "surveys": [
+      {
+        "frequency": "always",
+        "lastCompletedDate": {},
+        "name": "TodaysFeelings",
+        "questions": [
+          {
+            "expect": "same,better,worse",
+            "question": "Tell me how you are feeling right now compared to yesterday. ",
+            "responseAck": "Ok.,That's great.,Oh, sorry you feel that way."
+          },
+          {
+            "expect": "yes,no",
+            "question": "Is today rainy?",
+            "responseAck": "Too bad!,That's good."
+          }
+        ]
+      }
+    ]
+  }
+}  ];
 
 function updateSubjectAttributeOnly(self, ID, data, attribute, nextFunction) {
   let docClient = new AWS.DynamoDB.DocumentClient();
@@ -478,6 +397,8 @@ function expect2Str(expect) {
     // remove bars
     let words = expect.split(',');
     for (let i=0; i<words.length; i++) words[i]=words[i].split('|')[0];
+    if (words.length > 1) 
+	words[words.length-1]="or "+words[words.length-1];
     return words.join(", ");
 }
 
@@ -513,6 +434,11 @@ function handleSurveys(self, subject, word) {
     survey = subject.interactions.surveys[self.attributes.surveyIdx];
     question = survey.questions[self.attributes.surveyQuestionIdx];
     
+    /* Setup the 'expect' variable */
+    let expect = survey.defaultExpect;
+    if (!expect) expect = question.expect;
+    if (!expect) expect = "";  // means take whatever they say
+
     if (self.attributes.state == 'SurveyQuestion') {
 	if (self.attributes.surveyQuestionIdx == 0) {
 	    // build a new output record
@@ -524,17 +450,16 @@ function handleSurveys(self, subject, word) {
 	}  
 	self.attributes.state = 'SurveyAnswer';
 	msg = question.question;
+	if (question.expect && !question.gaveInitialPrompt) {
+	    question.gaveInitialPrompt = true;
+	    msg +=" You can say "+expect2Str(expect);
+	}
 	console.log('     handleSurvey: Asking: '+msg);
 	self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+msg, msg);
 	return;
     }
     
     /* Must be in 'answer' state */
-
-    /* Setup the 'expect' variable */
-    let expect = survey.defaultExpect;
-    if (!expect) expect = question.expect;
-    if (!expect) expect = "";  // means take whatever they say
 
     // See if the expected responses are yes/no type and then allow flexibility
     if (expect == "yes,no" || expect == "yes, no") {
@@ -602,7 +527,7 @@ function handleSurveys(self, subject, word) {
 				       if (self.attributes.surveyIdx >= subject.interactions.surveys.length) {
 					   console.log("Finished all surveys! Current completed is:",subject.interactions.completedSurveys);
 					   self.attributes.state = 'Start';
-					   self.attributes.prefix += "Completed all the surveys! ";
+					   self.attributes.prefix += "You completed all the surveys! , ... ";
 					   self.attributes.skipSurveys = true;
 					   console.log("     Saying:"+self.attributes.prefix);
 					   self.emit("InteractionIntent");
@@ -1082,14 +1007,16 @@ function handleLaunch(self, subject) {
     console.log('Launch event is asking the subject Are You Ready to kick-off the dialog');
     self.attributes.state = "Start";
     self.attributes.subject = subject;  // WARNING, this results in a full-copy when it comes back, NOT the reference
-    let launchLibrary="./"+subject.libraries.launch;
-    let launch=null;
     let launchMessage="";
-    try {
-	launch = require(launchLibrary);
-	launchMessage = launch.launchMessage;
-    } catch (e) {
-	console.log("Not able to load launch library "+launchLibrary,e);
+    if (subject.libraries && subject.libraries.launch) {
+	let launchLibrary="./"+subject.libraries.launch;
+	let launch=null;
+	try {
+	    launch = require(launchLibrary);
+	    launchMessage = launch.launchMessage;
+	} catch (e) {
+	    console.log("Not able to load launch library "+launchLibrary,e);
+	}
     }
     self.emit(':ask',getPrefix(self)+"..."+
 	      getRandom(RandomGetGreatingMessages)+subject.contact.firstName+'! '+
@@ -1140,14 +1067,23 @@ const handlers = {
             self.emit(':tell',"Ooops, trouble reading the database!");
             return;
           }
-          if (!data || !data.length) this.emit(':tell',"I'm sorry, your Alexa device is not set up yet. " +
-              "Please ask your caregiver to say... Alexa ... tell My Life, configure now... ");
+            if (!data || !data.length) this.emit(
+		':tell',
+		"Welcome. I see that your device is not yet associated with a MyLife account. "+
+		    "You can get an account at W W W dot Whole Life Plus Technology dot com. "+
+		    "If you have a 4 digit device code, please say:, Alexa tell My Life Setup. "+
+		    "Or, if you want to demo and play with this skill please say: Alexa "+
+		    "tell My Life demo.");
           else {
             self.attributes.deviceId = self.event.context.System.device.deviceId;
             console.log("Retievd subject:",data[0]);
             handleLaunch(this, data[0]);
           }
         });
+    },
+    'DemoIntent': function () {
+	this.attributes.isDemo = true;
+	handleLaunch(this, MyLife_Subjects[0]);
     },
     'ActivateIntent': function () {
 	dumpStuff('ActivateIntent', this);
@@ -1234,11 +1170,11 @@ const handlers = {
     },
 
     'AMAZON.HelpIntent': function () {
-        const speechOutput = HELP_MESSAGE;
-        const reprompt = HELP_REPROMPT;
-
-        this.response.speak(speechOutput).listen(reprompt);
-        this.emit(':responseReady');
+//        const speechOutput = HELP_MESSAGE;
+//        const reprompt = HELP_REPROMPT;
+	this.emit(':tell',HELP_MESSAGE);
+//        this.response.speak(speechOutput).listen(reprompt);
+//        this.emit(':responseReady');
     },
 
     'AMAZON.CancelIntent': function () {
