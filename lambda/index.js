@@ -1,5 +1,3 @@
-
-
 'use strict';
 const Alexa = require('alexa-sdk');
 const AWS = require('aws-sdk');
@@ -64,7 +62,7 @@ let MyLife_Subjects = [
     ]
   },
   "deviceID": "null",
-  "ID": "ChrisDemo1",
+  "ID": "SystemDemo1",
   "interactions": {
     "completedSideEffects": [
       {
@@ -125,7 +123,8 @@ function updateSubjectAttributeOnly(self, ID, data, attribute, nextFunction) {
   let docClient = new AWS.DynamoDB.DocumentClient();
   console.log('updateSubjectAttributeOnly: ',ID, ' attr:',attribute);
 
-  console.log('reading items from Subjects DynamoDB table');
+    if (self.attributes.isDemo) return nextFunction(self, null, {});
+  console.log('updating item in Subjects DynamoDB table');
   const params = {
         TableName: 'MyLife_Subjects',
         Key: {"ID":ID},
@@ -136,7 +135,7 @@ function updateSubjectAttributeOnly(self, ID, data, attribute, nextFunction) {
   console.log('...params:',params);
   docClient.update(params, (err, data) => {
         if (err) {
-            console.error("!!!! Unable to read item. Error JSON:", err);
+            console.error("!!!! Unable to update item. Error JSON:", err);
         }
         nextFunction(self, err, data.Item);
     });  
@@ -145,6 +144,7 @@ function updateSubjectAttributeOnly(self, ID, data, attribute, nextFunction) {
 function updateSubjectDB(self, subject, nextFunction) {
     let docClient = new AWS.DynamoDB.DocumentClient();
     console.log('updateSubjectDB: ',subject.ID);    
+    if (self.attributes.isDemo) return nextFunction(self, null, {});
     let params = {
 	TableName : "MyLife_Subjects",
 	Item : subject
@@ -160,6 +160,7 @@ function updateSubjectDB(self, subject, nextFunction) {
     
 function findUsersForSubject(self, subjectID, nextFunction) {
     console.log('findUsesrForSubject: ',subjectID);
+    if (self.attributes.isDemo) return nextFunction(self, null, {});
 
     var docClient = new AWS.DynamoDB.DocumentClient();
     console.log('reading items from Subjects DynamoDB table');
@@ -188,7 +189,7 @@ function findUsersForSubject(self, subjectID, nextFunction) {
 
 function findSubjectByDeviceID(self, deviceID, nextFunction) {
   console.log('findSubjectByDeviceID: ',deviceID);
-
+  if (self.attributes.isDemo) return nextFunction(self, null, {});
   var docClient = new AWS.DynamoDB.DocumentClient();
   const params = {
         TableName: 'MyLife_Subjects',
@@ -215,6 +216,7 @@ function findSubjectByDeviceID(self, deviceID, nextFunction) {
 function findSubjectByID(self, ID, nextFunction) {
   console.log('findSubjectByID: ',ID);
 
+  if (self.attributes.isDemo) return nextFunction(self, null, {});
   var docClient = new AWS.DynamoDB.DocumentClient();
   const params = {
         TableName: 'MyLife_Subjects',
@@ -1059,6 +1061,113 @@ function copySubject(self, copyFromID) {
 
 }
 
+function handleGetWeather(self) {
+    self.attributes.skipWeather = true;
+    console.log('********* HandleWeather ****************');
+    request("https://api.wunderground.com/api/587d331e9dd343e3/forecast/q/MA/Boston.json",(err, data) => {
+	let weather="";
+	if (err) weather="Error getting weather: "+err;
+	else {
+	    data=JSON.parse(data.body);
+	    let ary=data.forecast.txt_forecast.forecastday;
+	    weather+="The weather for today "+ary[0].title+" is "+ary[0].fcttext+", ...";
+	    weather+="The weather for "+ary[1].title+" is "+ary[1].fcttext+", ...";
+	    weather = weather.replace(/F./g,".");
+	    weather = weather.replace(/mph./g,"mph. , ");
+	    weather = weather.replace(/Winds NE/g, "Winds north east");
+	    weather = weather.replace(/Winds NW/g, "Winds north west");
+	    weather = weather.replace(/Winds NNE/g,"Winds north north east");
+	    weather = weather.replace(/Winds NNW/g,"Winds north north west");
+	    weather = weather.replace(/Winds SE/g, "Winds south east");
+	    weather = weather.replace(/Winds SW/g, "Winds south west");
+	    weather = weather.replace(/Winds SSE/g,"Winds south south east");
+	    weather = weather.replace(/Winds SSW/g,"Winds south south west");
+	    weather = weather.replace(/Winds E/g,  "Winds east");
+	    weather = weather.replace(/Winds W/g,  "Winds west");
+	    weather = weather.replace(/Winds S/g,  "Winds south");
+	    weather = weather.replace(/Winds N/g,  "Winds north");
+	}
+	console.log("Got weather:"+weather);
+	self.attributes.prefix+=" "+weather+" ";
+	self.emit('InteractionIntent');
+    });
+    return;
+}
+
+function handleNews(self, subject, word) {
+    console.log('********* HandleNews ****************');
+   console.log('handleNews: state:'+self.attributes.state);
+   
+   if (self.attributes.state == 'Start') {
+       self.attributes.skipNews = true;
+       self.attributes.state = 'NewsStart';
+       self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+"Would you like to hear your top news stories?","Please say yes or no.");
+       return;
+   }
+
+    if (self.attributes.state == 'NewsStart') {
+	if (isFalse(word.value)) {
+	    self.attributes.prefix += "OK., maybe another time. ... ";
+	    self.attributes.state = 'Start';
+	    return self.emit('InteractionIntent');
+	}
+	self.attributes.newsIdx=0;
+	self.attributes.newsURLs=[
+	    {
+		title : "CNN Health",
+		url: "http://rss.cnn.com/rss/cnn_health.rss"
+	    },
+	    {
+		title : "CNN U.S.",
+		url: "http://rss.cnn.com/rss/cnn_us.rss"
+	    }, /*
+	    {
+		title : "CNN Money",
+		url: "http://rss.cnn.com/rss/money_latest.rss"
+	    },
+	    {
+		title : "CNN Technology",
+		url: "http://rss.cnn.com/rss/cnn_tech.rss"
+	    }
+	    */
+	    ];
+	self.attributes.state = 'NewsGet';
+	self.emit('InteractionIntent');
+	return;
+    }
+
+    if (self.attributes.state == 'NewsGet') {
+	let parseString=require('xml2js').parseString;
+	let url=self.attributes.newsURLs[self.attributes.newsIdx];
+	console.log("Fetching "+url.url);
+	self.attributes.prefix += " From "+url.title+":, ";
+	request(url.url,(err, data) => {
+	    console.log('request result:',err);
+	    parseString(data.body, (err, data) => {
+		let andStr="";
+		for (let i=0; i < data.rss.channel[0].item.length && i < 2; i++) {
+		    let item=data.rss.channel[0].item[i];
+		    let str=item.description[0];
+		    str = str.split("<")[0];
+		    if (str>"") {
+			self.attributes.prefix += andStr + str + " ";
+			andStr = ", ... AND , ... ";
+		    }
+		}
+		self.attributes.newsIdx++;
+		if (self.attributes.newsIdx >= self.attributes.newsURLs.length) {
+		    self.attributes.state = "Start";
+		    self.attributes.prefix += ", , That's all the news stories, ... ";
+		}
+		else
+		    self.attributes.prefix += " , and "; // so it says: ", , ...and from CNN health..."
+		self.emit('InteractionIntent');
+	    });
+	});
+    }
+}
+
+
 const handlers = {
     'LaunchRequest': function () {
         console.log('********* LauchRequest ***********');
@@ -1082,6 +1191,7 @@ const handlers = {
         });
     },
     'DemoIntent': function () {
+	console.log('============================ DEMO INTENT ============================');
 	this.attributes.isDemo = true;
 	handleLaunch(this, MyLife_Subjects[0]);
     },
@@ -1131,14 +1241,8 @@ const handlers = {
       // The 'Start' state means we're either just-starting a session OR we've completed 
       // some tasks and look for more things to do.  Find the next thing to do or say goodbye.
       if (this.attributes.state == 'Start') {
-/*
-        if (subject.interactions.surveys && subject.interactions.surveys.length && !this.attributes.skipSurveys)
-          return handleSurveys(this, subject, word);
-*/
-/*
-        if (!this.attributes.skipSendMessage)
-          return handleSendMessage(this, subject, word);
-*/
+	  if (!this.attributes.skipWeather) 
+	      return handleGetWeather(this);
         if (subject.interactions.messages && subject.interactions.messages.length && !this.attributes.skipMessages)   
           return handleMessages(this, subject, word);
         if (subject.core.medications && subject.core.medications.length && !this.attributes.skipMeds)   
@@ -1147,12 +1251,15 @@ const handlers = {
           return handleSurveys(this, subject, word);
         if (subject.interactions.reminders && subject.interactions.reminders.selections && subject.interactions.reminders.selections.length && !this.attributes.skipReminders)   
           handleReminders(this, subject, word);  // DONT return; this sets up the 'prefix' attribute, or not
+	  if (!this.attributes.skipNews) 
+	      return handleNews(this, subject, word);
         if (!this.attributes.skipSendMessage)
           return handleSendMessage(this, subject, word);
       }
       
       if (this.attributes.state.startsWith('SendMessage')) return handleSendMessage(this, subject, word);
       if (this.attributes.state.startsWith('Messages')) return handleMessages(this, subject, word);
+      if (this.attributes.state.startsWith('News')) return handleNews(this, subject, word);
       if (this.attributes.state.startsWith('Meds')) return handleMeds(this, subject, word);
       if (this.attributes.state.startsWith('Survey')) return handleSurveys(this, subject, word);
 
@@ -1195,8 +1302,4 @@ exports.handler = function (event, context, callback) {
     alexa.execute();
 };
 
-let file='./test.js';
-const test =require(file);
-
-console.log("test:",test);
-
+console.log("Hi.");
