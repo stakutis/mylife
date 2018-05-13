@@ -119,7 +119,6 @@ function findSubjectAttributeOnly(ID, attribute, nextFunction) {
   let docClient = new AWS.DynamoDB.DocumentClient(region);
   console.log('findSubjectAttributeOnly: ',ID);
 
-  console.log('reading items from Subjects DynamoDB table');
   const params = {
         TableName: 'MyLife_Subjects',
         Key: {"ID":ID},
@@ -132,6 +131,46 @@ function findSubjectAttributeOnly(ID, attribute, nextFunction) {
   docClient.get(params, (err, data) => {
         if (err) {
             console.error("Unable to read item. Error JSON:", err);
+        }
+        nextFunction(err, data.Item);
+    });  
+
+  return null;
+}
+
+function findSubject(ID, nextFunction) {
+  let docClient = new AWS.DynamoDB.DocumentClient(region);
+  console.log('findSubject: ',ID);
+
+  console.log('reading items from Subjects DynamoDB table');
+  const params = {
+        TableName: 'MyLife_Subjects',
+        Key: {"ID":ID},
+        ConsistentRead: false
+  };
+  console.log('scanning with params:',params);
+  docClient.get(params, (err, data) => {
+        if (err) {
+            console.error("Unable to read item. Error JSON:", err);
+        }
+        nextFunction(err, data.Item);
+    });  
+
+  return null;
+}
+
+function updateSubject(ID, data, nextFunction) {
+  let docClient = new AWS.DynamoDB.DocumentClient(region);
+  console.log('findSubjectAttributeOnly: ',ID);
+
+  const params = {
+      TableName: 'MyLife_Subjects',
+      Item : data
+  };
+  console.log('scanning with params:',params);
+  docClient.put(params, (err, data) => {
+        if (err) {
+            console.error("Unable to update item. Error JSON:", err);
         } else {
             console.log("scan succeeded: data:");
             console.log(data);
@@ -146,7 +185,6 @@ function updateSubjectAttributeOnly(ID, data, attribute, nextFunction) {
   let docClient = new AWS.DynamoDB.DocumentClient(region);
   console.log('findSubjectAttributeOnly: ',ID);
 
-  console.log('reading items from Subjects DynamoDB table');
   const params = {
         TableName: 'MyLife_Subjects',
         Key: {"ID":ID},
@@ -157,11 +195,8 @@ function updateSubjectAttributeOnly(ID, data, attribute, nextFunction) {
   console.log('scanning with params:',params);
   docClient.update(params, (err, data) => {
         if (err) {
-            console.error("Unable to read item. Error JSON:", err);
-        } else {
-            console.log("scan succeeded: data:");
-            console.log(data);
-        }
+            console.error("Unable to update item. Error JSON:", err);
+        } 
         nextFunction(err, data.Item);
     });  
 
@@ -298,7 +333,7 @@ function handleSMSSurvey(user, msg) {
 }
 
 
-function validatePhone(phone) {
+function makeValidPhone(phone) {
     phone=phone.replace(/-/g,'');
     phone=phone.replace('(','');
     phone=phone.replace(')','');
@@ -308,6 +343,65 @@ function validatePhone(phone) {
 	phone='+'+phone;
     return phone;
 }
+
+function addReminder(subjectID, reminder, nextFunc) {
+    findSubject(subjectID, (err, subject) => {
+	console.log('err:',err,' subject:',subject);
+	subject.interactions.reminders.selections.push(reminder);
+	updateSubject(subjectID, subject, (err, data) => {
+	    console.log("Update err:",err);
+	    nextFunc(err);
+	});
+    });
+}
+
+function handleMyLifeCommand(req, user, subjectID) {
+    // Let's first see if this is a "command" to mylife instead of just a msg to a subject
+    let words=req.body.Body.split(" ");
+    if (!words.length || words[0].toLowerCase()!='mylife') return false;
+    // Its a command for us
+    console.log("Got a 'mylife' command");
+    if (words.length == 1) {
+	sendSMS(req.body.From,"Hi. After 'mylife' you can say one-of: friend, reminder, survey, likes.");
+	return true;
+    }
+    switch (words[1].toLowerCase()) {
+    case 'reminder':
+	if (words.length == 2)
+	    sendSMS(req.body.From,"Hi. After 'mylife reminder' please write the reminder sentence");
+	else {
+	    let reminder="";
+	    for (let i=2; i<words.length; i++) reminder+=words[i]+" ";
+	    addReminder(subjectID, reminder, (err) => {
+		if (!err) sendSMS(req.body.From,"Reminder added; thank-you!");
+		else sendSMS(req.body.From,"Failed, database error:"+err);
+	    });
+	}
+	break;	
+    case 'friend':
+	console.log("Adding a friend");
+	if (words.length != 4)
+	    sendSMS(req.body.From,"Hi. After 'mylife friend' please write the friend's first name and phone#");
+	else {
+	    let firstName=words[2];
+	    let phone=makeValidPhone(words[3]);
+	    updateUser(phone, firstName, subjectID, (err, data) => {
+		if (!err) {
+		    sendSMS(req.body.From,"Added friend, firstName="+firstName+" phone="+phone+" tied to subject:"+subjectID);
+		    sendSMS(phone,"Greetings. You've been added as a MyLife Friend to "+subjectID+". Save this phone number. Use it to send messages to your friend.");
+		}
+		else
+		    sendSMS(req.body.From,"Error adding friend, err:"+err);
+	    });
+	}
+	break;
+    default:
+	sendSMS(req.body.From,"Hi. I didn't understand. After 'mylife' you can say one-of: friend, reminder, survey, likes.");
+    }
+    
+    return true;
+}
+
 
 app.post('/sms', (req, res) => {
     console.log('Hey, we got some message! From:',req.body.From);
@@ -324,7 +418,7 @@ app.post('/sms', (req, res) => {
 	else
 	    if (parts[0]=="add") {
 		var phone=parts[1], name=parts[2], doctor=parts[3];
-		phone=validatePhone(phone);
+		phone=makeValidPhone(phone);
 		if (parts.length==4) doctor="Dr. "+doctor;
 		if (parts.length>4) doctor=doctor + " " + parts[4];
 		console.log('Adding: phone:'+phone+' name:'+name+' doctor:'+doctor);
@@ -333,7 +427,7 @@ app.post('/sms', (req, res) => {
 	    }
 	else
 	    if (parts[0]=="start") {
-		let user=activeUsers[validatePhone(parts[1])];
+		let user=activeUsers[makeValidPhone(parts[1])];
 		if (!user) sendSMS(req.body.From,"User is not known; I'm wicked sorry for ya pal. Take a lesson in typing or get a better job.");
 		else {
 		    user.state = 'prestart';
@@ -360,62 +454,64 @@ app.post('/sms', (req, res) => {
 	    else 
 		if (!user) console.log('No users matching the incoming phone number '+req.body.From);
 	    else {
-		console.log('Will search for user: '+user.subjectID);
-		findSubjectAttributeOnly(user.subjectID,"interactions.messages",(err,subject)=>{
-		    console.log("find: got: data:",subject);
-		    subject.interactions.messages.push(
-			{
-			    from: user.contact.firstName,
-			    userPhone: user.phone,
-			    msg: req.body.Body
-			});
-		    updateSubjectAttributeOnly(user.subjectID, 
-					       subject.interactions.messages, 
-					       "interactions.messages", (err,data) => {
-						   console.log('result of put err:',err,' data:',data);
-					       })
-		});
+		console.log('Will search for subject: '+user.subjectID);
+		if (!handleMyLifeCommand(req, user, user.subjectID))  {
+		    findSubjectAttributeOnly(user.subjectID,"interactions.messages",(err,subject)=>{
+			if (err) console.log("ERROR finding subject!");
+			subject.interactions.messages.push(
+			    {
+				from: user.contact.firstName,
+				userPhone: user.phone,
+				msg: req.body.Body
+			    });
+			updateSubjectAttributeOnly(user.subjectID, 
+						   subject.interactions.messages, 
+						   "interactions.messages", (err,data) => {
+						       console.log('result of put err:',err,' data:',data);
+						   });
+		    });
+		}
 	    }
 	});
 
     res.writeHead(200, {'Content-Type': 'text/xml'});
     res.end();
-/*
-    const twiml = new MessagingResponse();
-
-    twiml.message('The Robots are coming chris! Head for the hills!');
-
-    res.writeHead(200, {'Content-Type': 'text/xml'});
-    res.end(twiml.toString());
-*/
 });
 
 app.get('/', (req, res) => {
-    console.log('Hey, we got a GET! req:',req);
+    console.log('Hey, we got a GET! of / ');
 
   res.writeHead(200, {'Content-Type': 'text/xml'});
   res.end("happy happy");
 });
 
-let parseString=require('xml2js').parseString;
-// cnn_us, money_latest, cnn_allpolitics, cnn_tech, cnn_health
-request("http://rss.cnn.com/rss/cnn_allpolitics.rss",(err, data) => {
-    console.log('request result:',err);
-    parseString(data.body, (err, data) => {
-	for (let i=0; i < data.rss.channel[0].item.length; i++) {
-	    let item=data.rss.channel[0].item[i];
-	    let str=item.description[0];
-	    console.log("i:"+i+":"+str.split("<")[0]);
-	}
-    });
-});
 
-/*
-activeUsers = JSON.parse(fs.readFileSync('activeUsers.json','utf-8'));
-console.log('activeUsers:',activeUsers);
+
+function updateUser(phone, firstName, subjectID, nextFunc) {
+ let docClient = new AWS.DynamoDB.DocumentClient(region);
+  const params = {
+      TableName: 'MyLife_Users',
+      Key: {"phone":phone},
+      UpdateExpression: "set #s = :s, #c = :f",
+      ExpressionAttributeNames: {"#s":"subjectID", "#c":"contact"},
+      ExpressionAttributeValues: { ":s":subjectID, ":f":{ firstName: firstName}}
+  };
+  console.log('...params:',params);
+  docClient.update(params, (err, data) => {
+        if (err) {
+            console.error("!!!! Unable to update item. Error JSON:", err);
+        }
+        nextFunc(err, data.Item);
+    });  
+}
+
+
+try {
+    activeUsers = JSON.parse(fs.readFileSync('activeUsers.json','utf-8'));
+} catch (e) {console.log("could not read active SMS user file");}
 const port=80;
 console.log("Starting the web server...");
 http.createServer(app).listen(port, () => {
     console.log('Express server listening on port '+port);
 });
-*/
+

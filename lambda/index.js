@@ -46,20 +46,7 @@ let MyLife_Subjects = [
         ]
       }
     },
-    "medications": [
-      {
-        "name": "Aspirin",
-        "sideEffects": "Bloating, mental anquish"
-      },
-      {
-        "name": "Tylenol",
-        "sideEffects": "Mood swings, strange happiness"
-      },
-      {
-        "name": "Jelly beans",
-        "sideEffects": "Stomache ache, soreness"
-      }
-    ]
+      "medications": ["atenolol","oxybutynin","metformin"]
   },
   "deviceID": "null",
   "ID": "SystemDemo1",
@@ -351,7 +338,7 @@ function dumpStuff(intent, self) {
     // 'context' has .System.device.deviceId
 }
 
-const RandomGetStartedMessages=[
+const RandomEndMessages=[
     "We're off to the races!",
     "Enjoy the rest of the day.",
     "Remember, life is good.",
@@ -369,6 +356,10 @@ const RandomGetGreatingMessages=[
     
 function getRandom(ary) {
   return ary[Math.floor(Math.random() * ary.length)];
+}
+
+function getRandomNumber(range) {
+    return  Math.floor(Math.random() * range);
 }
 
 function getPrefix(self) {
@@ -657,47 +648,86 @@ function handleSurveys_SAVE(self, subject, word) {
     self.emit('InteractionIntent');  
 }
 
+function getMedication(self, medication, nextFunc) {
+    console.log("getMedication: "+medication);
+    if (self.attributes.isDemo) return nextFunction(self, null, {});
+    var docClient = new AWS.DynamoDB.DocumentClient();
+    const params = {
+        TableName: 'MyLife_Medications',
+        Key: { "medication": medication },
+        ConsistentRead: false
+    };
+    docClient.get(params, (err, data) => {
+        if (err) {
+            console.error("!!!! Unable to read item. Error JSON:", err);
+        }
+	else console.log("Got medication:",data.Item);
+        nextFunc(self, err, data.Item);
+    });  
+}
+
 
 function handleMeds(self, subject, word) {
   let msg="";
   console.log('handleMeds: state:'+self.attributes.state);
    
-  if (self.attributes.state == 'Start') {
-      console.log('************** MEDS start **************');
-      // Pick a random med and then ask if they have symptoms
-      let idx = Math.floor(Math.random() * subject.core.medications.length);
-      
-      // First, if the selected med doesn't have a side-effects list, then we'll
-      // skip doing this
-      if (!subject.core.medications[idx].sideEffects ||
-          subject.core.medications[idx].sideEffects=="") {
-            self.attributes.skipMeds = true;
-            self.emit('InteractionIntent');  // Just come back to our evaluator
-            return;
-          }
+    if (self.attributes.state == 'Start') {
+	console.log('************** MEDS start **************');
+	self.attributes.skipMeds = true;
+	// Pick a random med and then ask if they have symptoms
+	let idx = Math.floor(Math.random() * subject.core.medications.length);
 
-      msg = "Let's check for any side effects of your medications. ";
-      msg += getRandom(RandomSideEffectStart)+subject.core.medications[idx].name+', today do you have any of these conditions: '+
-        subject.core.medications[idx].sideEffects+'?';
-      self.attributes.medicationName = subject.core.medications[idx].name;
-      self.attributes.medicationSideEffects = subject.core.medications[idx].sideEffects;
-      self.attributes.state = 'MedsResponse';
-      self.attributes.skipMeds = false;
-      console.log("     Saying:"+msg);
-      self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+msg,"Please say yes or no.");
-      return;
-  }
+	// Now, look-up the medication in the database
+	getMedication(self, subject.core.medications[idx], (self, err, medication) => {
+	    console.log("Found medication:",medication);
+	    if (!medication) {
+		self.attributes.prefix += "Unable to find your medication "+subject.core.medications[idx]+" in our database! ";
+		return;
+	    }
+	    self.attributes.medication=medication;
+
+	    // First, let's randomly pick to do the side-effect question or the tip
+	    if (getRandomNumber(2)==0) {
+		console.log("Let's do a medication TIP...");
+		let tips=medication.tips.split(",");
+		if (tips.length) {
+		    let tip=getRandom(RandomSideEffectStart)+medication.prettyName+", I have this tip for you: "+getRandom(tips)+". <break time='1s'/> ";
+		    self.attributes.prefix += tip;
+		    console.log("Tip:",tip);
+		}
+		self.emit('InteractionIntent');
+		return;
+	    }
+	    
+	    // First, if the selected med doesn't have a side-effects list, then we'll
+	    // skip doing this
+	    if (!medication.sideEffects ||
+		medication.sideEffects=="") {
+		console.log("no medication side effects");
+		self.emit('InteractionIntent');  // Just come back to our evaluator
+		return;
+            }
+
+	    msg = "Let's check for any side effects of your medications. ";
+	    msg += getRandom(RandomSideEffectStart)+medication.prettyName+', today do you have any of these conditions: '+
+		medication.sideEffects+'?';
+	    self.attributes.state = 'MedsResponse';
+	    console.log("     Saying:"+msg);
+	    self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+msg,"Please say yes or no.");
+	});
+	return;
+    }
 
   if (self.attributes.state == 'MedsResponse') {
     if (isTrue(word.value)) {
-      console.log('handleMeds: Subject said yes to side effect');
-      if (!subject.interactions.completedSideEffects) subject.interactions.completedSideEffects = [];
-      subject.interactions.completedSideEffects.push({
-        date : new Date().toISOString(),
-        medication : self.attributes.medicationName,
-        sideEffects: self.attributes.medicationSideEffects 
-      });
-      updateSubjectAttributeOnly(self, subject.ID, 
+	console.log('handleMeds: Subject said yes to side effect');
+	if (!subject.interactions.completedSideEffects) subject.interactions.completedSideEffects = [];
+	subject.interactions.completedSideEffects.push({
+            date : new Date().toISOString(),
+            medication : self.attributes.medication.medication,
+            sideEffects: self.attributes.medication.sideEffects 
+	});
+	updateSubjectAttributeOnly(self, subject.ID, 
 				 subject.interactions.completedSideEffects, 
 				 "interactions.completedSideEffects", (self, err, data) => {
 				     msg = "";
@@ -709,6 +739,11 @@ function handleMeds(self, subject, word) {
 				 });
       return;
     }
+      if (!isFalse(word.value)) {
+	  console.log("did give us a good yes/now word");
+	  self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+" Please say yes or no","Please say yes or no");
+	  return;
+      }
     console.log('handleMeds: Subject said NO to side effect');
     msg += getRandom(["That's great! ","Super. ","Thanx. ","Ok. "]);
   }
@@ -721,12 +756,9 @@ function handleMeds(self, subject, word) {
   }
   
   self.attributes.state = "Start";
-  //msg += "Ready to continue?";
-  self.attributes.skipMeds = true;
   self.attributes.prefix += msg;
   console.log("     Saying:"+self.attributes.prefix+msg);
   self.emit('InteractionIntent');
-  //self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+msg,"Please say yes or no.");
   
   return;
 }
@@ -876,7 +908,7 @@ function handleMessages(self, subject, word) {
     if (!isTrue(word.value)) {
       self.attributes.state = 'Start';
       self.attributes.skipMessages = true;
-      self.attributes.prefix += "That's fine "+subject.contact.firstName+", I'll save them for later; ";
+      self.attributes.prefix += "That's fine "+subject.contact.firstName+", I'll save them for later. <break time='1s'/> ";
       self.emit('InteractionIntent');
       return;
     }
@@ -1061,109 +1093,129 @@ function copySubject(self, copyFromID) {
 
 }
 
-function handleGetWeather(self) {
+function handleWeather(self, subject, word) {
     self.attributes.skipWeather = true;
     console.log('********* HandleWeather ****************');
-    request("https://api.wunderground.com/api/587d331e9dd343e3/forecast/q/MA/Boston.json",(err, data) => {
-	let weather="";
-	if (err) weather="Error getting weather: "+err;
-	else {
-	    data=JSON.parse(data.body);
-	    let ary=data.forecast.txt_forecast.forecastday;
-	    weather+="The weather for today "+ary[0].title+" is "+ary[0].fcttext+", ...";
-	    weather+="The weather for "+ary[1].title+" is "+ary[1].fcttext+", ...";
-	    weather = weather.replace(/F./g,".");
-	    weather = weather.replace(/mph./g,"mph. , ");
-	    weather = weather.replace(/Winds NE/g, "Winds north east");
-	    weather = weather.replace(/Winds NW/g, "Winds north west");
-	    weather = weather.replace(/Winds NNE/g,"Winds north north east");
-	    weather = weather.replace(/Winds NNW/g,"Winds north north west");
-	    weather = weather.replace(/Winds SE/g, "Winds south east");
-	    weather = weather.replace(/Winds SW/g, "Winds south west");
-	    weather = weather.replace(/Winds SSE/g,"Winds south south east");
-	    weather = weather.replace(/Winds SSW/g,"Winds south south west");
-	    weather = weather.replace(/Winds E/g,  "Winds east");
-	    weather = weather.replace(/Winds W/g,  "Winds west");
-	    weather = weather.replace(/Winds S/g,  "Winds south");
-	    weather = weather.replace(/Winds N/g,  "Winds north");
+    if (self.attributes.state == 'Start') {
+	self.attributes.skipWeather = true;
+	self.attributes.state = 'WeatherStart';
+	self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+"Would you like to hear the weather forecast?","Please say yes or no.");
+	return;
+    }
+
+    if (self.attributes.state == 'WeatherStart') {
+	if (isFalse(word.value)) {
+	    self.attributes.state = 'Start';
+	    return self.emit('InteractionIntent');
 	}
-	console.log("Got weather:"+weather);
-	self.attributes.prefix+=" "+weather+" ";
-	self.emit('InteractionIntent');
-    });
-    return;
+	request("https://api.wunderground.com/api/587d331e9dd343e3/forecast/q/MA/Boston.json",(err, data) => {
+	    let weather="";
+	    if (err) weather="Error getting weather: "+err;
+	    else {
+		data=JSON.parse(data.body);
+		let ary=data.forecast.txt_forecast.forecastday;
+		weather+="The weather for today "+ary[0].title+" is "+ary[0].fcttext+", ...";
+		weather+="The weather for "+ary[1].title+" is "+ary[1].fcttext+", ...";
+		weather = weather.replace(/F./g,".");
+		weather = weather.replace(/mph./g,"mph. , ");
+		weather = weather.replace(/Winds NE/g, "Winds north east");
+		weather = weather.replace(/Winds NW/g, "Winds north west");
+		weather = weather.replace(/Winds NNE/g,"Winds north north east");
+		weather = weather.replace(/Winds NNW/g,"Winds north north west");
+		weather = weather.replace(/Winds SE/g, "Winds south east");
+		weather = weather.replace(/Winds SW/g, "Winds south west");
+		weather = weather.replace(/Winds SSE/g,"Winds south south east");
+		weather = weather.replace(/Winds SSW/g,"Winds south south west");
+		weather = weather.replace(/Winds E/g,  "Winds east");
+		weather = weather.replace(/Winds W/g,  "Winds west");
+		weather = weather.replace(/Winds S/g,  "Winds south");
+		weather = weather.replace(/Winds N/g,  "Winds north");
+	    }
+	    console.log("Got weather:"+weather);
+	    self.attributes.state = 'Start';
+	    self.attributes.prefix+=" "+weather+" <break time='2s'/> ";
+	    self.emit('InteractionIntent');
+	});
+	return;
+    }
 }
 
 function handleNews(self, subject, word) {
     console.log('********* HandleNews ****************');
    console.log('handleNews: state:'+self.attributes.state);
-   
+    word = word.value.toLowerCase();
+    
    if (self.attributes.state == 'Start') {
        self.attributes.skipNews = true;
-       self.attributes.state = 'NewsStart';
-       self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+"Would you like to hear your top news stories?","Please say yes or no.");
+       self.attributes.state = 'NewsPick';
+       self.emit('InteractionIntent');
        return;
    }
 
-    if (self.attributes.state == 'NewsStart') {
-	if (isFalse(word.value)) {
-	    self.attributes.prefix += "OK., maybe another time. ... ";
+    if (self.attributes.state == 'NewsPick') {
+	let pref=" Would you like to hear your top news stories? ";
+	if (self.attributes.newsCategory) pref=" Would you like to hear other stories? ";
+	console.log('Setting pref to:'+pref);
+	self.attributes.state = 'NewsSelected';
+	// WARNING: Alexa wont hear the world "health" instead hears "help" and that forces a the help intent
+	self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+pref+
+		  "You can say, No, or U.S., or world, or medicine, or money, or tech.","Please say No, or U.S., or world, or medicine, or money, or tech.");
+	return;
+    }
+
+    if (self.attributes.state == 'NewsSelected') {
+	if (isFalse(word)) {
+	    if (self.attributes.newsCategory)
+		self.attributes.prefix += "OK., ";
+	    else
+		self.attributes.prefix += "OK., maybe another time. ... ";
 	    self.attributes.state = 'Start';
 	    return self.emit('InteractionIntent');
 	}
-	self.attributes.newsIdx=0;
-	self.attributes.newsURLs=[
-	    {
-		title : "CNN Health",
-		url: "http://rss.cnn.com/rss/cnn_health.rss"
-	    },
-	    {
-		title : "CNN U.S.",
-		url: "http://rss.cnn.com/rss/cnn_us.rss"
-	    }, /*
-	    {
-		title : "CNN Money",
-		url: "http://rss.cnn.com/rss/money_latest.rss"
-	    },
-	    {
-		title : "CNN Technology",
-		url: "http://rss.cnn.com/rss/cnn_tech.rss"
-	    }
-	    */
-	    ];
+
 	self.attributes.state = 'NewsGet';
+	self.attributes.newsCategory = word;
+	switch (word) {
+	case 'medicine':
+	case 'health': self.attributes.newsURL = "http://rss.cnn.com/rss/cnn_health.rss"; break;
+	case 'us':  self.attributes.newsCategory = "U.S.";  // let fall thru to next
+	case 'u.s.' : self.attributes.newsURL = "http://rss.cnn.com/rss/cnn_us.rss"; break;
+	case 'world' : self.attributes.newsURL = "http://rss.cnn.com/rss/cnn_world.rss"; break;
+	case 'money': self.attributes.newsURL = "http://rss.cnn.com/rss/money_latest.rss"; break;
+	case 'tech': self.attributes.newsURL = "http://rss.cnn.com/rss/cnn_tech.rss"; break;
+	default:
+	    self.attributes.prefix +=" Oh, I didn't understand the word "+word+". , ";
+ 	    self.attributes.state = 'NewsPick';
+	}
 	self.emit('InteractionIntent');
 	return;
     }
 
     if (self.attributes.state == 'NewsGet') {
 	let parseString=require('xml2js').parseString;
-	let url=self.attributes.newsURLs[self.attributes.newsIdx];
-	console.log("Fetching "+url.url);
-	self.attributes.prefix += " From "+url.title+":, ";
-	request(url.url,(err, data) => {
+	let url=self.attributes.newsURL;
+	console.log("Fetching "+url);
+	self.attributes.prefix += " From CNN "+self.attributes.newsCategory+":, ";
+	request(url,(err, data) => {
 	    console.log('request result:',err);
 	    parseString(data.body, (err, data) => {
 		let andStr="";
-		for (let i=0; i < data.rss.channel[0].item.length && i < 2; i++) {
+		let i;
+		for (i=0; i < data.rss.channel[0].item.length && i < 2; i++) {
 		    let item=data.rss.channel[0].item[i];
 		    let str=item.description[0];
 		    str = str.split("<")[0];
 		    if (str>"") {
 			self.attributes.prefix += andStr + str + " ";
-			andStr = ", ... AND , ... ";
+			andStr = ' <break time="1s"/> AND , <break time="1s"/>' ;
 		    }
 		}
-		self.attributes.newsIdx++;
-		if (self.attributes.newsIdx >= self.attributes.newsURLs.length) {
-		    self.attributes.state = "Start";
-		    self.attributes.prefix += ", , That's all the news stories, ... ";
-		}
-		else
-		    self.attributes.prefix += " , and "; // so it says: ", , ...and from CNN health..."
+		console.log('Retrieved '+i+' stories.');
+		self.attributes.state = 'NewsPick';
 		self.emit('InteractionIntent');
 	    });
 	});
+	return;
     }
 }
 
@@ -1242,7 +1294,7 @@ const handlers = {
       // some tasks and look for more things to do.  Find the next thing to do or say goodbye.
       if (this.attributes.state == 'Start') {
 	  if (!this.attributes.skipWeather) 
-	      return handleGetWeather(this);
+	      return handleWeather(this);
         if (subject.interactions.messages && subject.interactions.messages.length && !this.attributes.skipMessages)   
           return handleMessages(this, subject, word);
         if (subject.core.medications && subject.core.medications.length && !this.attributes.skipMeds)   
@@ -1258,13 +1310,14 @@ const handlers = {
       }
       
       if (this.attributes.state.startsWith('SendMessage')) return handleSendMessage(this, subject, word);
+      if (this.attributes.state.startsWith('Weather')) return handleWeather(this, subject, word);
       if (this.attributes.state.startsWith('Messages')) return handleMessages(this, subject, word);
       if (this.attributes.state.startsWith('News')) return handleNews(this, subject, word);
       if (this.attributes.state.startsWith('Meds')) return handleMeds(this, subject, word);
       if (this.attributes.state.startsWith('Survey')) return handleSurveys(this, subject, word);
 
       console.log('InteractionIntent: Finished all tasks.');
-      this.emit(':tell', getPrefix(this)+" That's all for today. "+RandomGetStartedMessages[Math.floor(Math.random() * RandomGetStartedMessages.length)] + 
+	this.emit(':tell', getPrefix(this)+" That's all for today. "+getRandom(RandomEndMessages)+
                 " Please come back soon "+subject.contact.firstName);
       this.attributes.state="";
     },
