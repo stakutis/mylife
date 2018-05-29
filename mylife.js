@@ -7,41 +7,8 @@ let region=    {
             secretAccessKey: 'aigUwCkRdYqsN8KOZcAPvJbM0r65CXywbNuwhgWX'};
 
 
-/*
-  let params = {
-    TableName : "MyLife_Subjects",
-      Key: {ID:"Richard"},
-      UpdateExpression: "set interactions.messages[0] = :r",
-      ExpressionAttributeValues: {
-	  ":r" : "life is good"
-},
-    Item : {
-	ID : "Richard",
-	contact : "Fish"
-    }
-  };
-  console.log("**************************** Updating Subject Database VIA PUT ******************************");
-  docClient.update(params, (err,data) => {
-    if (err) {
-      console.log("Error updating subject table:",err);
-    } else console.log("Finished write, data:",data);
-  });
-*/
+let awaitChoice = { };
 
-/*
-  let params = {
-    TableName : "MyLife_Subjects",
-      Key: {"ID":"Richard"},
-//      AttributesToGet: ["contact","core","interactions"]
-//      ProjectionExpression: "contact,core,interactions.reminders.selections[1],caregiverID"
-  };
-  console.log("**************************** Updating Subject Database VIA PUT ******************************");
-  docClient.get(params, (err,data) => {
-   if (err) {
-      console.log("Error getting subject table:",err);
-    } else console.log("Finished get, data:",data);
-  });
-*/
 const  surveys=[
       {
         "defaultAck": "That's great,OK,,Yick,Oh I'm sorry",
@@ -96,20 +63,22 @@ function findUserByPhone(phone, nextFunction) {
 
   console.log('reading items from Users DynamoDB table');
   const params = {
-        TableName: 'MyLife_Users',
-        Key: {"phone":phone},
-        ConsistentRead: false,
-        ReturnConsumedCapacity: "TOTAL"
+      TableName: 'MyLife_Users',
+      FilterExpression:
+      "begins_with(phone, :phone)",
+      ExpressionAttributeValues: {
+	  ":phone":phone}
   };
   console.log('scanning with params:',params);
-  docClient.get(params, (err, data) => {
+//  docClient.get(params, (err, data) => {
+  docClient.scan(params, (err, data) => {
         if (err) {
             console.error("Unable to read item. Error JSON:", err);
         } else {
 //            console.log("scan succeeded: data:");
-//            console.log(data);
+//            console.log(data.Items);
         }
-        nextFunction(err, data.Item);
+        nextFunction(err, data.Items);
     });  
 
   return null;
@@ -138,6 +107,38 @@ function findSubjectAttributeOnly(ID, attribute, nextFunction) {
   return null;
 }
 
+function messageFriends(respondTo, subjectID, msg) {
+    let docClient = new AWS.DynamoDB.DocumentClient(region);
+    console.log("****MessageFriends subject:"+subjectID+" msg:"+msg);
+    let sentTo="";
+
+    const params = {
+        TableName: 'MyLife_Users',
+        FilterExpression: '#subjectIDName = :subjectID ',
+        ExpressionAttributeNames: {
+            '#subjectIDName': 'subjectID'
+        },
+        ExpressionAttributeValues : {
+            ':subjectID': subjectID
+        },
+    };
+    console.log('scanning with params:',params);
+    docClient.scan(params, (err, data) => {
+        if (err) {
+            console.error("Unable to read item. Error JSON:", err);
+        }
+	else {
+	    msg = "[MyLife] "+msg+" ; *** NOTE: Do not respond to this message; messages sent to this number go to your patient. ***";
+	    for (let i=0; i<data.Items.length; i++) {
+		let user=data.Items[i];
+		sentTo+=" "+user.contact.firstName;
+		sendSMS(user.phone, msg);
+	    }
+	    sendSMS(respondTo, "Messsages sent to:"+sentTo);
+	}
+    });  
+}
+
 function findSubject(ID, nextFunction) {
   let docClient = new AWS.DynamoDB.DocumentClient(region);
   console.log('findSubject: ',ID);
@@ -161,7 +162,7 @@ function findSubject(ID, nextFunction) {
 
 function updateSubject(ID, data, nextFunction) {
   let docClient = new AWS.DynamoDB.DocumentClient(region);
-  console.log('findSubjectAttributeOnly: ',ID);
+  console.log('updateSubject: ',ID);
 
   const params = {
       TableName: 'MyLife_Subjects',
@@ -183,27 +184,27 @@ function updateSubject(ID, data, nextFunction) {
 
 function updateSubjectAttributeOnly(ID, data, attribute, nextFunction) {
   let docClient = new AWS.DynamoDB.DocumentClient(region);
-  console.log('findSubjectAttributeOnly: ',ID);
+  console.log('updateSubjectAttributeOnly: ',ID);
 
   const params = {
         TableName: 'MyLife_Subjects',
         Key: {"ID":ID},
         UpdateExpression: "set "+attribute+" = :r",
-        ExpressionAttributeValues: { ":r":data},
-        ReturnConsumedCapacity: "TOTAL"
+        ExpressionAttributeValues: { ":r":data}
   };
   console.log('scanning with params:',params);
   docClient.update(params, (err, data) => {
         if (err) {
             console.error("Unable to update item. Error JSON:", err);
         } 
-        nextFunction(err, data.Item);
+      nextFunction(err, data ? data.Item: null);
     });  
 
   return null;
 }
 
 function sendSMS(toNumber, msg, nextFunc) {
+    toNumber = toNumber.split('-')[0];
     console.log("will send ["+msg+"] to number:",toNumber);
     request.post("https://api.twilio.com/2010-04-01/Accounts/AC6203fa66f81b40708bbc4810c28fe049/Messages",
 		 { 
@@ -355,6 +356,17 @@ function addReminder(subjectID, reminder, nextFunc) {
     });
 }
 
+function addSurvey(subjectID, survey, nextFunc) {
+    findSubject(subjectID, (err, subject) => {
+	console.log('err:',err,' subject:',subject);
+	subject.interactions.surveys.push(survey);
+	updateSubject(subjectID, subject, (err, data) => {
+	    console.log("Update err:",err);
+	    nextFunc(err);
+	});
+    });
+}
+
 function handleMyLifeCommand(req, user, subjectID) {
     // Let's first see if this is a "command" to mylife instead of just a msg to a subject
     let words=req.body.Body.split(" ");
@@ -378,6 +390,21 @@ function handleMyLifeCommand(req, user, subjectID) {
 	    });
 	}
 	break;	
+    case 'survey':
+	console.log("Adding a survey");
+	if (words.length != 3)
+	    sendSMS(req.body.From,"Hi. After 'mylife survey' please write the survey name. Current survey names are: pain, happiness, social.");
+	else {
+	    if ("pain,happiness,social".indexOf(words[2])==-1) {
+		sendSMS(req.body.From,"Sorry, that survey name '"+words[2]+"' is not one I recognize.");
+		break;
+	    }
+	    addSurvey(subjectID, words[2].toLowerCase().trim()+":"+req.body.From+":"+user.contact.firstName, (err) => {
+		if (!err) sendSMS(req.body.From,"Survey added; thank-you!");
+		else sendSMS(req.body.From,"Failed, database error:"+err);
+	    });
+	}
+	break;
     case 'friend':
 	console.log("Adding a friend");
 	if (words.length != 4)
@@ -402,6 +429,87 @@ function handleMyLifeCommand(req, user, subjectID) {
     return true;
 }
 
+function createSubject(subjectID, notifyNumber) {
+    console.log("Creating subject "+subjectID);
+    // First copy 'ChrisDemo1'
+    findSubject('ChrisDemo1', (err, subject) => {
+	console.log('err:',err,' subject:',subject);
+	subject.ID = subjectID;
+	subject.contact.firstName = subjectID;
+	subject.deviceID = '1234'
+	updateSubject(subjectID, subject, (err, data) => {
+	    console.log("Update err:",err);
+	    sendSMS(notifyNumber,'Result of add:'+err+' device temporary ID is '+subject.deviceID);
+	});
+    });
+}
+
+function updateSubjectAttributes(req, words) {
+    let subjectID = words[2];
+    console.log("UpdateSubjectAttributes");
+    for (let i=3; i<words.length; i++) {
+	let keyvalue=words[i].split("=");
+	console.log("updating key ["+keyvalue[0]+"] to value ["+keyvalue[1]+"]");
+	updateSubjectAttributeOnly(subjectID, 
+				   keyvalue[1],
+				   keyvalue[0], (err,data) => {
+				       console.log('result of put err:',err,' data:',data);
+				       sendSMS(req.body.From,"Result of key "+keyvalue[0]+" is:"+err);
+			       });
+    }
+}
+
+function handleMyLifeSystemCommand(req) {
+    let words=req.body.Body.split(" ");
+    let subjectID=words[2];
+    if (!words.length || words[0].toLowerCase()!='cjs') return false;
+    // Its a command for us
+    console.log("Got a 'mylife' SYSTEM command");
+    if (words.length == 1) {
+	sendSMS(req.body.From,"Hi. After 'cjs' you can say 'subject' plus subjectID plus 'create' or attribute=value --OR-- "+
+	   "You can say 'friend' plus subjectID firstName phone --OR-- 'blast' plus subjectID message-to-friends .");
+	return true;
+    }
+    switch (words[1].toLowerCase()) {
+    case 'friend':
+	if (words.length != 5) {
+	    sendSMS(req.body.From,"Missing values(s). Expected either 'cjs friend subjectID firstName phone");
+	    break;
+	}
+	let firstName=words[3];
+	let phone=makeValidPhone(words[4]);
+	updateUser(phone, firstName, subjectID, (err, data) => {
+	    if (!err) {
+		sendSMS(req.body.From,"Added friend, firstName="+firstName+" phone="+phone+" tied to subject:"+subjectID);
+		sendSMS(phone,"Greetings. You've been added as a MyLife Friend to "+subjectID+". Save this phone number. Use it to send messages to your friend.");
+	    }
+	    else
+		sendSMS(req.body.From,"Error adding friend, err:"+err);
+	});
+	break;
+    case 'subject':
+	if (words.length < 4) {
+	    sendSMS(req.body.From,"Missing values(s). Expected either 'subjectID create' or 'subjectID key=value'");
+	    break;
+	}
+	if (words[3].toLowerCase()=='create')
+	    createSubject(subjectID,req.body.From);
+	else
+	    updateSubjectAttributes(req, words);
+	break;
+    case 'blast':
+	if (words.length < 4) {
+	    sendSMS(req.body.From,"Missing values(s). Expected either 'subjectID msg-to-friends'");
+	    break;
+	}
+	msg=words.slice(2);
+	messageFriends(req.body.From,subjectID, msg.join(" "));
+	break;
+    default:
+	sendSMS(req.body.From,"Sorry, unknown key word:"+words[1]);
+    }
+    return true;
+}
 
 app.post('/sms', (req, res) => {
     console.log('Hey, we got some message! From:',req.body.From);
@@ -449,34 +557,88 @@ app.post('/sms', (req, res) => {
     if (user)
 	handleSMSSurvey(user, req.body.Body);
     else
-	findUserByPhone(req.body.From, function (err, user) {
-	    if (err) console.log('Error reading Users table:',err);
-	    else 
-		if (!user) console.log('No users matching the incoming phone number '+req.body.From);
-	    else {
-		console.log('Will search for subject: '+user.subjectID);
-		if (!handleMyLifeCommand(req, user, user.subjectID))  {
-		    findSubjectAttributeOnly(user.subjectID,"interactions.messages",(err,subject)=>{
-			if (err) console.log("ERROR finding subject!");
-			subject.interactions.messages.push(
-			    {
-				from: user.contact.firstName,
-				userPhone: user.phone,
-				msg: req.body.Body
-			    });
-			updateSubjectAttributeOnly(user.subjectID, 
-						   subject.interactions.messages, 
-						   "interactions.messages", (err,data) => {
-						       console.log('result of put err:',err,' data:',data);
-						   });
-		    });
+	if (!handleMyLifeSystemCommand(req)) {
+	    if (awaitChoice[req.body.From]) {
+		// First make sure not timed-out
+		if (new Date() - awaitChoice[req.body.From] > 15*1000) {
+		    console.log('awaitChoice timed out, removing')
+		    awaitChoice[req.body.From]=null;
+		}
+		else {
+		    req.body.Body=req.body.Body.trim().toLowerCase();
+		    console.log("Looking for patient:"+req.body.Body);
+		    for (let i=0; i<awaitChoice[req.body.From].users.length; i++) {
+			console.log('comparing ['+awaitChoice[req.body.From].users[i].subjectID.toLowerCase()+'] to ['+
+				    req.body.Body+']');
+			if (awaitChoice[req.body.From].users[i].subjectID.toLowerCase() ==
+			    req.body.Body) {
+			    console.log('Found patient! '+awaitChoice[req.body.From].users[i].subjectID);
+			    sendMessageToPatient(
+				awaitChoice[req.body.From].users[i].subjectID,
+				awaitChoice[req.body.From].users[i].contact.firstName,
+				req.body.From,
+				awaitChoice[req.body.From].msg);
+			    sendSMS(req.body.From,"Message sent to "+awaitChoice[req.body.From].users[i].subjectID);
+			    awaitChoice[req.body.From]=null;
+			    return;
+			}
+		    }
+		    console.log('Cound not find the patient!');
+		    sendSMS(req.body.From,"Patient not found; try again.");
+		    return;
 		}
 	    }
-	});
+	    findUserByPhone(req.body.From, function (err, users) {
+		if (err) console.log('Error reading Users table:',err);
+		else 
+		    if (!users || users.length==0)
+			console.log('No users matching the incoming phone number '+req.body.From);
+		if (users.length>1) {
+		    console.log("Multiple users detected for incoming phone number");
+		    let msg="Pick which patient: ";
+		    for (let i=0; i<users.length; i++) {
+			msg+=users[i].subjectID+" ";
+		    }
+		    awaitChoice[req.body.From] = {
+			users: users,
+			msg: req.body.Body,
+			time: new Date()};
+		    sendSMS(req.body.From, msg);
+		}
+		else {
+		    let user=users[0];
+		    console.log('Will search for subject: '+user.subjectID);
+		    if (!handleMyLifeCommand(req, user, user.subjectID))  {
+			sendMessageToPatient(user.subjectID,
+					     user.contact.firstName,
+					     user.phone.split('-')[0],
+					     req.body.Body);
+		    }
+		}
+	    });
+	}
 
     res.writeHead(200, {'Content-Type': 'text/xml'});
     res.end();
 });
+
+
+function sendMessageToPatient(subjectID, fromFirstName, fromPhone, msg) {
+    findSubjectAttributeOnly(subjectID,"interactions.messages",(err,subject)=>{
+	if (err) console.log("ERROR finding subject!");
+	subject.interactions.messages.push(
+	    {
+		from: fromFirstName,
+		userPhone: fromPhone,
+		msg: msg
+	    });
+	updateSubjectAttributeOnly(subjectID, 
+				   subject.interactions.messages, 
+				   "interactions.messages", (err,data) => {
+				       console.log('result of put err:',err,' data:',data);
+				   });
+    });
+}
 
 app.get('/', (req, res) => {
     console.log('Hey, we got a GET! of / ');
