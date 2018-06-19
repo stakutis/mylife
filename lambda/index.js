@@ -19,7 +19,7 @@ let MyLife_Subjects = [
   "contact": {
     "cell": "1112223333",
     "email": "vin@heaven.com",
-    "firstName": "John",
+    "firstName": "Lucy",
     "lastName": "Smith",
     "zipcode": "01742"
   },
@@ -74,9 +74,6 @@ let MyLife_Subjects = [
       "frequency": "always",
       "selections": [
         "Dont forget to go for a walk today.",
-        "Please take your medications on schedule.",
-        "Be careful in the snow!",
-        "Be sure to eat all of your dinner.",
         "Your family loves you; think about that."
       ],
       "whichOne": "random1"
@@ -397,18 +394,29 @@ function expect2Str(expect) {
 }
 
 function handleReminders(self, subject, word) {
-  let msg="";
-  console.log('handleReminders: state:'+self.attributes.state);
-   
-  if (self.attributes.state == 'Start') {
-      console.log(' ************* REMINDERS start **************');
-      // Pick a random reminder and then add it to the prefix attribute
-      msg = "You have the following reminder: ";
-      msg += getRandom(subject.interactions.reminders.selections)+' <break time="1s"/> ' ;
-      self.attributes.prefix += msg;
-      self.attributes.state = 'Start';
-      self.attributes.skipReminders = true;
-  }
+    let msg="";
+    console.log('handleReminders: state:'+self.attributes.state);
+    
+    if (self.attributes.state == 'Start') {
+	let plural='';
+	if (subject.interactions.reminders.selections.length>1) plural='s';
+	console.log(' ************* REMINDERS start **************');
+	// Pick a random reminder and then add it to the prefix attribute
+	msg = "You have the following reminder"+plural+": ";
+	for (let i=0; i < subject.interactions.reminders.selections.length; i++) {
+	    msg += subject.interactions.reminders.selections[i];
+	    if (i!=subject.interactions.reminders.selections.length-1)
+		msg +=' <break time="500ms"/> AND ' ;
+	}
+	msg += ' <break time="1s"/> ' ;
+	subject.interactions.reminders.selections=[];
+	updateSubjectDB(self, subject, () => {
+	    self.attributes.prefix += msg;
+	    self.attributes.state = 'Start';
+	    self.attributes.skipReminders = true;
+	    self.emit('InteractionIntent');
+	});
+    }
 }
 
 function handleSurveys(self, subject, word) {
@@ -894,7 +902,7 @@ function handleSendMessage(self, subject, word) {
 	}
 	else {
 	    console.log('Asking for the message to send...');
-	    self.attributes.sendTo=users[idx].phone;
+	    self.attributes.sendTo=users[idx].phone.split('-')[0];
 	    self.attributes.state="SendMessageGetMessage";
 	    console.log("     Asking for SMS message");
 	    self.emit(':elicitSlot','RandomWordSlot',
@@ -1198,8 +1206,10 @@ function handleWeather(self, subject, word) {
 function handleAnnounce(self, subject, word) {
     console.log("******** Handle Announce ******");
     self.attributes.skipAnnounce=true;
-    if (subject.ID == "Brenda") {
-	sendSMS(self, '+19787643488', 'Brenda signed in', () => {
+//    if (subject.ID == "Brenda")
+    console.log("Sending message to stakutis about starting patient "+subject.ID);
+    {
+	sendSMS(self, '+19787643488', subject.ID+' signed in', () => {
 	    self.emit('InteractionIntent');	    
 	});
 	return;
@@ -1290,7 +1300,7 @@ function handleNews(self, subject, word) {
 const handlers = {
     'LaunchRequest': function () {
         console.log('********* LauchRequest ***********');
-	console.log("...looking up by device id...");
+	console.log("Looking up by device id...");
         let subject=findSubjectByDeviceID(this, this.event.context.System.device.deviceId, (self, err, data) => {
           if (err) {
 	      console.log('error reading for device:',err);
@@ -1362,6 +1372,12 @@ const handlers = {
       if (this.attributes.state == 'Start') {
 	  if (!this.attributes.skipAnnounce)
 	      return handleAnnounce(this, subject, word);
+
+        if (subject.interactions.reminders && subject.interactions.reminders.selections && subject.interactions.reminders.selections.length && !this.attributes.skipReminders)   
+          return handleReminders(this, subject, word); 
+	  
+
+
         if (subject.interactions.messages && subject.interactions.messages.length && !this.attributes.skipMessages)   
           return handleMessages(this, subject, word);
         if (subject.core.medications && subject.core.medications.length && !this.attributes.skipMeds)   
@@ -1369,7 +1385,7 @@ const handlers = {
         if (subject.interactions.surveys && subject.interactions.surveys.length && !this.attributes.skipSurveys)
           return handleSurveys(this, subject, word);
         if (subject.interactions.reminders && subject.interactions.reminders.selections && subject.interactions.reminders.selections.length && !this.attributes.skipReminders)   
-          handleReminders(this, subject, word);  // DONT return; this sets up the 'prefix' attribute, or not
+          return handleReminders(this, subject, word); 
         if (!this.attributes.skipSendMessage)
           return handleSendMessage(this, subject, word);
 	  if (!this.attributes.skipWeather) 
@@ -1378,7 +1394,8 @@ const handlers = {
 	      return handleNews(this, subject, word);
       }
       
-      if (this.attributes.state.startsWith('Announce')) return handleAnnounce(this, subject, word);
+      if (this.attributes.state.startsWith('Reminder')) return handleReminder(this, subject, word);
+      if (this.attributes.state.startsWith('Announce')) return handleAnnounce(this, subject, word); 
       if (this.attributes.state.startsWith('SendMessage')) return handleSendMessage(this, subject, word);
       if (this.attributes.state.startsWith('Weather')) return handleWeather(this, subject, word);
       if (this.attributes.state.startsWith('Messages')) return handleMessages(this, subject, word);

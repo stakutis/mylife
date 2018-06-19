@@ -367,9 +367,22 @@ function addSurvey(subjectID, survey, nextFunc) {
     });
 }
 
+function addCalendar(subjectID, calendar, nextFunc) {
+    findSubject(subjectID, (err, subject) => {
+	console.log('err:',err,' subject:',subject);
+	if (!subject.interactions.calendar) subject.interactions.calendar=[];
+	subject.interactions.calendar.push(calendar);
+	updateSubject(subjectID, subject, (err, data) => {
+	    console.log("Update err:",err);
+	    nextFunc(err);
+	});
+    });
+}
+
 function handleMyLifeCommand(req, user, subjectID) {
     // Let's first see if this is a "command" to mylife instead of just a msg to a subject
     let words=req.body.Body.split(" ");
+    console.log('handleMyLifeCommand: words[0]:'+words[0]);
     if (!words.length || words[0].toLowerCase()!='mylife') return false;
     // Its a command for us
     console.log("Got a 'mylife' command");
@@ -392,10 +405,11 @@ function handleMyLifeCommand(req, user, subjectID) {
 	break;	
     case 'survey':
 	console.log("Adding a survey");
+	const surveys="pain, happiness, social, adl";
 	if (words.length != 3)
-	    sendSMS(req.body.From,"Hi. After 'mylife survey' please write the survey name. Current survey names are: pain, happiness, social.");
+	    sendSMS(req.body.From,"Hi. After 'mylife survey' please write the survey name. Current survey names are: "+surveys+".");
 	else {
-	    if ("pain,happiness,social".indexOf(words[2])==-1) {
+	    if (surveys.indexOf(words[2])==-1) {
 		sendSMS(req.body.From,"Sorry, that survey name '"+words[2]+"' is not one I recognize.");
 		break;
 	    }
@@ -403,6 +417,27 @@ function handleMyLifeCommand(req, user, subjectID) {
 		if (!err) sendSMS(req.body.From,"Survey added; thank-you!");
 		else sendSMS(req.body.From,"Failed, database error:"+err);
 	    });
+	}
+	break;
+    case 'appointment':
+    case 'appt':
+    case 'calendar':
+	console.log("Adding a calendar event");
+	if (words.length < 3)
+	    sendSMS(req.body.From,"Hi. After 'mylife "+words[1]+"' please write date&time and then the message for the calendar entry.");
+	else {
+	    let str="";
+	    for (let i=2; i<words.length; i++) str+=words[i]+' ';
+	    let result=decodeCalendarEvent(str);
+	    console.log('Result:',result);
+	    if (typeof result == 'string')
+		sendSMS(req.body.From,result);
+	    else {
+		addCalendar(subjectID, result, (err) => {
+		    if (!err) sendSMS(req.body.From,"Calendar added; thank-you!");
+		    else sendSMS(req.body.From,"Failed, database error:"+err);
+		});
+	    }
 	}
 	break;
     case 'friend':
@@ -423,7 +458,7 @@ function handleMyLifeCommand(req, user, subjectID) {
 	}
 	break;
     default:
-	sendSMS(req.body.From,"Hi. I didn't understand. After 'mylife' you can say one-of: friend, reminder, survey, likes.");
+	sendSMS(req.body.From,"Hi. I didn't understand. After 'mylife' you can say one-of: friend, reminder, survey, appointment.");
     }
     
     return true;
@@ -462,6 +497,7 @@ function updateSubjectAttributes(req, words) {
 function handleMyLifeSystemCommand(req) {
     let words=req.body.Body.split(" ");
     let subjectID=words[2];
+    console.log('handleMyLifeSystemCommand: words[0]='+words[0]);
     if (!words.length || words[0].toLowerCase()!='cjs') return false;
     // Its a command for us
     console.log("Got a 'mylife' SYSTEM command");
@@ -510,6 +546,11 @@ function handleMyLifeSystemCommand(req) {
     }
     return true;
 }
+
+
+
+
+
 
 app.post('/sms', (req, res) => {
     console.log('Hey, we got some message! From:',req.body.From);
@@ -560,6 +601,7 @@ app.post('/sms', (req, res) => {
 	if (!handleMyLifeSystemCommand(req)) {
 	    if (awaitChoice[req.body.From]) {
 		// First make sure not timed-out
+		console.log("We are in awaitChoice...");
 		if (new Date() - awaitChoice[req.body.From] > 15*1000) {
 		    console.log('awaitChoice timed out, removing')
 		    awaitChoice[req.body.From]=null;
@@ -572,22 +614,27 @@ app.post('/sms', (req, res) => {
 				    req.body.Body+']');
 			if (awaitChoice[req.body.From].users[i].subjectID.toLowerCase() ==
 			    req.body.Body) {
+			    let user=awaitChoice[req.body.From].users[i];
 			    console.log('Found patient! '+awaitChoice[req.body.From].users[i].subjectID);
-			    sendMessageToPatient(
-				awaitChoice[req.body.From].users[i].subjectID,
-				awaitChoice[req.body.From].users[i].contact.firstName,
-				req.body.From,
-				awaitChoice[req.body.From].msg);
-			    sendSMS(req.body.From,"Message sent to "+awaitChoice[req.body.From].users[i].subjectID);
+			    req.body.Body = awaitChoice[req.body.From].msg; // hack; so handleMyLifeCommand has the original
+			    if (!handleMyLifeCommand(req, user, user.subjectID))  {
+				sendMessageToPatient(
+				    user.subjectID,
+				    user.contact.firstName,
+				    req.body.From,
+				    awaitChoice[req.body.From].msg);
+				sendSMS(req.body.From,"Message sent to "+awaitChoice[req.body.From].users[i].subjectID);
+			    }
 			    awaitChoice[req.body.From]=null;
 			    return;
 			}
 		    }
 		    console.log('Cound not find the patient!');
-		    sendSMS(req.body.From,"Patient not found; try again.");
+		    sendSMS(req.body.From,"Patient "+req.body.Body+" not found; try again.");
 		    return;
 		}
 	    }
+	    console.log('non system command, lookingup patients for this user');
 	    findUserByPhone(req.body.From, function (err, users) {
 		if (err) console.log('Error reading Users table:',err);
 		else 
@@ -625,7 +672,14 @@ app.post('/sms', (req, res) => {
 
 function sendMessageToPatient(subjectID, fromFirstName, fromPhone, msg) {
     findSubjectAttributeOnly(subjectID,"interactions.messages",(err,subject)=>{
-	if (err) console.log("ERROR finding subject!");
+	if (err) {
+	    console.log("ERROR finding subject!");
+	    return;
+	}
+	if (!subject) {
+	    console.log("ERROR sendMessageToPatient: Could not find subject "+subjectID);
+	    return;
+	}
 	subject.interactions.messages.push(
 	    {
 		from: fromFirstName,
@@ -668,6 +722,222 @@ function updateUser(phone, firstName, subjectID, nextFunc) {
 }
 
 
+function getMonth(str) {
+    str=str.toLowerCase(str);
+    switch (str) {
+    case 'jan':
+    case 'january': return '01';
+    case 'feb':
+    case 'february': return '02';
+    case 'mar':
+    case 'march': return '03';
+    case 'apr':
+    case 'april': return '04';
+    case 'may': return '05';
+    case 'jun':
+    case 'june': return '06';
+    case 'jul':
+    case 'july': return '07';
+    case 'aug':
+    case 'august': return '08';
+    case 'sep':
+    case 'september': return '09';
+    case 'oct':
+    case 'october': return '10';
+    case 'nov':
+    case 'november': return '11';
+    case 'dec':
+    case 'december': return '12';
+    default: return null;
+    }
+}
+
+function convertMiscDateStringToUTC(incoming) {
+    /*
+      Handle these various formats
+      Jun[e] XX[th,st,nd,rd,,] [YYYY] 3:00[ ]{am/pm}
+      Jun 5th 3:00  (no year)
+      6-4[-2018] 3:15[ ]{am/pm}
+      6/4[/2018]
+
+      if no am/pm:
+      if 7..HH..11 assume am
+      if 12..HH..6 assume pm
+    */
+    //console.log('convert from:'+str);
+    let str=incoming;
+    try {
+	str = str.replace(',','');  // Strip out commas
+	str = str.replace('@','');  // Strip out at
+	str = str.replace('at','');  // Strip out at
+	let parts=str.split(' ');
+	let month, day, year;
+	let mmddyyy, timeStr;
+	parts[0]=parts[0].replace('-','/');  // Coerce to use slash if at all
+	mmddyyyy = parts[0].split('/');
+	//console.log('mmddyyyy:'+mmddyyyy);
+
+	/*
+	 * First, see if it is a numeric format like:
+	 *   6/4/2018
+	 *   6/4/2018 3:00
+	 *   6/4/2018 3:00pm
+	 *   6/4/2018 3:00 pm
+	 *   6/4 3:00pm
+	 */
+	if (mmddyyyy.length > 1) {
+	    //console.log('It is a digit-date');
+	    month=mmddyyyy[0];
+	    day=mmddyyyy[1];
+	    /** See if year is present **/
+	    if (mmddyyyy.length > 2) {
+		year=mmddyyyy[2];
+	    }
+	    else {
+		/** No year present **/
+		year=''+(new Date().getFullYear());
+	    }
+	    /** Now, accumulate all the time string fields for the bottom part of processing **/
+	    if (parts.length < 2)   // Missing time stamp entirely
+		timeStr = "12:00pm";
+	    else {
+		/* Recall, could be: "3:00" "3:00am" "3:00 am" */
+		timeStr = parts[1];
+		if (parts.length == 3) timeStr+=parts[2];  // Force '3:00 pm' to '3:00pm'
+	    }
+	}
+	else {
+	    /* Format is one of:
+	       Jun 4th 2018 timeStr
+	       Jun 3 timeStr
+	    */
+	    month=getMonth(parts[0]);
+	    //console.log('Parse month:',month);
+	    if (parts.length==1) return null;  // User didn't specify DD or rest
+	    parts[1]=parts[1].toLowerCase();
+	    /* Rip-off any decorators */
+	    parts[1]=parts[1].replace('th','');
+	    parts[1]=parts[1].replace('st','');
+	    parts[1]=parts[1].replace('dn','');
+	    parts[1]=parts[1].replace('rd','');
+	    day=parts[1];
+	    //console.log('day is:'+day);
+	    if (parts.length==2) {
+		// User only specified: June 12 ; so assume current year and noon
+		year=''+(new Date().getFullYear());
+		timeStr="12:00pm";
+	    } 
+	    else {
+		year=parts[2];
+		// They might not have specified the year!
+		let intYear=parseInt(year);
+		if (intYear<2018 || intYear>2025) {
+		    // E.g. Jun 15 3:00 pm
+		    timeStr=year;
+		    year=''+new Date().getFullYear();
+		    if (parts.length==4) timeStr+=parts[3];
+		}
+		else  {
+		    if (parts.length==3) { // User gave no time so assume noon
+			timeStr ="12:00pm";
+		    } else {
+			timeStr=parts[3];
+			if (parts.length==5) timeStr+=parts[4]; // Force '3:00 pm' to '3:00pm'
+		    }
+		}
+	    }
+	}
+
+	/* Ok, timeStr might be: '3:00' or '3:00a.m.' or '3:00am' or '3pm' */
+	timeStr=timeStr.toLowerCase();
+	timeStr.replace('a.m.','am');
+	timeStr.replace('p.m.','pm');
+	if (timeStr.indexOf('am') == -1 && timeStr.indexOf('pm') == -1) {
+	    /*
+              if 7..HH..11 assume am
+	      if 12..HH..6 assume pm
+	    */
+	    let hh_int = parseInt(timeStr.split(':')[0]);
+	    if (hh_int >=7 && hh_int <=11) timeStr+="am";
+	    else
+		if (hh_int >=12 && hh_int <=6) timeStr+="pm";
+	    else return null;  // Can't happen
+	}
+	timeStr=timeStr.replace('am',' am');
+	timeStr=timeStr.replace('pm',' pm');
+
+	/* Let's see if they didn't use a colon in the time */
+	if (timeStr.indexOf(':')==-1) {
+	    timeStr=timeStr.split(' ')[0]+':00 '+timeStr.split(' ')[1];
+	}
+
+	/* Let's see if they are asking for a month into next year */
+	let curMonth=new Date().getMonth()+1;
+	let intMonth=parseInt(month);
+	if (intMonth < curMonth)
+	    year=''+(parseInt(year)+1);
+
+	let dateStr=month+'-'+day+'-'+year+' '+timeStr;
+	//console.log("Using:"+dateStr);
+	let UTC=new Date(dateStr);
+	//console.log("UTC:"+UTC);
+	//console.log("---Str:"+new Date(UTC));
+	console.log('Incoming:['+incoming+'] result:['+UTC+']');
+	return UTC;
+    } catch (e) {
+	console.log('Failed:'+e);
+	return null;
+    }
+}
+
+function convertMiscDateStringInLocaleToUTC(str) {
+    console.log('convertMiscDateStringInLocaleToUTC:'+str);
+    let d=convertMiscDateStringToUTC(str);
+    if (!d) return null; // Failed to convert dateStr
+    console.log('  as New Date():'+new Date(d));
+    d = d.getTime() + 4*60*60*1000;
+    let dd=new Date(); dd.setTime(d);
+    console.log('  as      shift:'+dd);
+    console.log('Minutes from now:'+(d - new Date().getTime())/1000/60);
+    return d;
+}
+
+convertMiscDateStringToUTC('Jun 4, 2018');
+convertMiscDateStringToUTC('JULY 14, 2018 11:00');
+convertMiscDateStringToUTC('6/4/2018');
+convertMiscDateStringToUTC('6/4/2018 3 pm');
+convertMiscDateStringToUTC('6/4/2018 3pm');
+convertMiscDateStringToUTC('6/4/2018 3:00');
+convertMiscDateStringToUTC('6/4/2018 3:00pm');
+convertMiscDateStringToUTC('6/4/2018 3:00 pm');
+convertMiscDateStringToUTC('6/4 3:00pm');
+convertMiscDateStringToUTC('1/4 3:00pm');
+
+let d=convertMiscDateStringInLocaleToUTC('jun 19 8:10am');
+
+function decodeCalendarEvent(str) {
+    console.log('Decoding the calendar event:'+str);
+    /* Find the am or pm or colon and split in 1/2 */
+    let i;
+    i=str.indexOf('am');
+    if (i == -1) i=str.indexOf('AM');
+    if (i == -1) i=str.indexOf('pm');
+    if (i == -1) i=str.indexOf('PM');
+    if (i == -1) {
+	i = str.indexOf(':');  // time stamp part
+	if (i==-1) return "Failed to find the calendar message text";  // failure
+    }
+    i=i+3;
+    let dateStr=str.substr(0,i);
+    let msg=str.substr(i);
+    console.log('dateStr['+dateStr+'] msg:'+msg);
+    let dd=convertMiscDateStringInLocaleToUTC(dateStr);
+    if (!dd) return "Could not understand the date and time";
+    return {date:dd, msg:msg};
+}
+
+decodeCalendarEvent('6/4/2018 3 pm Wish me luck');
+
 try {
     activeUsers = JSON.parse(fs.readFileSync('activeUsers.json','utf-8'));
 } catch (e) {console.log("could not read active SMS user file");}
@@ -676,4 +946,6 @@ console.log("Starting the web server...");
 http.createServer(app).listen(port, () => {
     console.log('Express server listening on port '+port);
 });
+
+
 
