@@ -387,7 +387,7 @@ function handleMyLifeCommand(req, user, subjectID) {
     // Its a command for us
     console.log("Got a 'mylife' command");
     if (words.length == 1) {
-	sendSMS(req.body.From,"Hi. After 'mylife' you can say one-of: friend, reminder, survey, likes.");
+	sendSMS(req.body.From,"Hi. After 'mylife' you can say one-of: friend, reminder, survey, event.");
 	return true;
     }
     switch (words[1].toLowerCase()) {
@@ -419,6 +419,7 @@ function handleMyLifeCommand(req, user, subjectID) {
 	    });
 	}
 	break;
+    case 'event':
     case 'appointment':
     case 'appt':
     case 'calendar':
@@ -458,7 +459,7 @@ function handleMyLifeCommand(req, user, subjectID) {
 	}
 	break;
     default:
-	sendSMS(req.body.From,"Hi. I didn't understand. After 'mylife' you can say one-of: friend, reminder, survey, appointment.");
+	sendSMS(req.body.From,"Hi. I didn't understand. After 'mylife' you can say one-of: friend, reminder, survey, appointment/event.");
     }
     
     return true;
@@ -495,9 +496,10 @@ function updateSubjectAttributes(req, words) {
 }
 
 function handleMyLifeSystemCommand(req) {
+    console.log('handleMyLifeSystemCommand: Body:'+req.body.Body);
     let words=req.body.Body.split(" ");
     let subjectID=words[2];
-    console.log('handleMyLifeSystemCommand: words[0]='+words[0]);
+    console.log('!!handleMyLifeSystemCommand: words[0]='+words[0]);
     if (!words.length || words[0].toLowerCase()!='cjs') return false;
     // Its a command for us
     console.log("Got a 'mylife' SYSTEM command");
@@ -553,8 +555,9 @@ function handleMyLifeSystemCommand(req) {
 
 
 app.post('/sms', (req, res) => {
-    console.log('Hey, we got some message! From:',req.body.From);
+    console.log('Hey, we got some message! From:',req.body.From+' msg:'+req.body.Body);
 
+    req.body.Body=req.body.Body.trim(); // Remove leading/trailing spaces
     // First, let's see if the in-coming phone is stakutis or batulis AND is a command
     if (req.body.From == '+19787643488' || req.body.From == '+16128023116') {
 	let done=true;
@@ -591,8 +594,8 @@ app.post('/sms', (req, res) => {
 	    res.end();
 	    return;
 	}
+	console.log('Continuing...');
     }
-
     // Next, see if the in-coming phone is an SMS user; if so process, else process as MyLife
     const user=activeUsers[req.body.From];
     if (user)
@@ -601,8 +604,8 @@ app.post('/sms', (req, res) => {
 	if (!handleMyLifeSystemCommand(req)) {
 	    if (awaitChoice[req.body.From]) {
 		// First make sure not timed-out
-		console.log("We are in awaitChoice...");
-		if (new Date() - awaitChoice[req.body.From] > 15*1000) {
+		console.log("We are in awaitChoice...checking if timed out; Now="+new Date().getTime()+' vs '+awaitChoice[req.body.From].time);
+		if (new Date().getTime() - awaitChoice[req.body.From].time > 15*1000) {
 		    console.log('awaitChoice timed out, removing')
 		    awaitChoice[req.body.From]=null;
 		}
@@ -649,7 +652,7 @@ app.post('/sms', (req, res) => {
 		    awaitChoice[req.body.From] = {
 			users: users,
 			msg: req.body.Body,
-			time: new Date()};
+			time: new Date().getTime()};
 		    sendSMS(req.body.From, msg);
 		}
 		else {
@@ -902,6 +905,7 @@ function convertMiscDateStringInLocaleToUTC(str) {
     return d;
 }
 
+/*
 convertMiscDateStringToUTC('Jun 4, 2018');
 convertMiscDateStringToUTC('JULY 14, 2018 11:00');
 convertMiscDateStringToUTC('6/4/2018');
@@ -912,8 +916,7 @@ convertMiscDateStringToUTC('6/4/2018 3:00pm');
 convertMiscDateStringToUTC('6/4/2018 3:00 pm');
 convertMiscDateStringToUTC('6/4 3:00pm');
 convertMiscDateStringToUTC('1/4 3:00pm');
-
-let d=convertMiscDateStringInLocaleToUTC('jun 19 8:10am');
+*/
 
 function decodeCalendarEvent(str) {
     console.log('Decoding the calendar event:'+str);
@@ -936,8 +939,321 @@ function decodeCalendarEvent(str) {
     return {date:dd, msg:msg};
 }
 
+/*
 decodeCalendarEvent('6/4/2018 3 pm Wish me luck');
+let d=convertMiscDateStringInLocaleToUTC('jun 28 8:10pm');
+let test=new Date(d - 4*60*60*1000);
+console.log('as date:'+test);
+console.log('as locale:'+test.toDateString());
+console.log(test.toLocaleTimeString());
+let diff=d - new Date();
+console.log('days from now:'+(diff/1000/60/60/24));
+*/
 
+
+function dayStr2Num(d1) {
+    //console.log('dayStr2Num:'+d1);
+    switch (d1) {
+    case '1':
+    case '1st':
+    case 'one':
+    case 'first': d1=1; break;
+    case '2':
+    case '2nd':
+    case 'to':
+    case 'too':
+    case 'two':
+    case 'second': d1=2; break;
+    case '3':
+    case '3rd':
+    case 'three':
+    case 'third': d1=3; break;
+    case '4':
+    case '4th':
+    case 'four':
+    case 'fourth': d1=4; break;
+    case '5':
+    case '5th':
+    case 'five':
+    case 'fifth': d1=5; break;
+    case '6':
+    case '6th':
+    case 'six':
+    case 'sixth': d1=6; break;
+    case '7':
+    case '7th':
+    case 'seven':
+    case 'seventh':
+	d1=7; break;
+    case '8':
+    case '8th':
+    case 'eight':
+    case 'eighth':
+	d1=8; break;
+    case '9':
+    case '9th':
+    case 'ninth':
+    case 'nine':
+	d1=9; break;
+    case '10':
+    case '10th':
+    case 'ten':
+    case 'tenth':
+	d1=10; break;
+    case '11':
+    case '11th':
+    case 'eleven':
+    case 'eleventh':
+	d1=11; break;
+    case '12':
+    case '12th':
+    case 'twelve':
+    case 'twelveth':
+	d1=12; break;
+    case '13':
+    case '13th':
+    case 'thirteen':
+    case 'thirteenth':
+	d1=13; break;
+    case '14':
+    case '14th':
+    case 'fourteen':
+    case 'fourteenth':
+	d1=14; break;
+    case '15':
+    case '15th':
+    case 'fifteen':
+    case 'fifteenth':
+	d1=15; break;
+    case '16':
+    case '16th':
+    case 'sixteen':
+    case 'sixteenth':
+	d1=16; break;
+    case '17':
+    case '17th':
+    case 'seventeen':
+    case 'seventeenth':
+	d1=17; break;
+    case '18':
+    case '18th':
+    case 'eighteen':
+    case 'eighteenth':
+	d1=18; break;
+    case '19':
+    case '19th':
+    case 'nineteen':
+    case 'nineteenth':
+	d1=19; break;
+    case '20':
+    case '20th':
+    case 'twenty':
+    case 'twentyth':
+	d1=20; break;
+    case '30':
+    case '30th':
+    case 'thirty':
+    case 'thirtyth':
+	d1=30; break;
+    default:
+	console.log('bad day:'+d1);
+	return null;
+    }
+    return d1;
+}
+
+function convertSpokenDateStr(incoming) {
+    // june twenty third at three p.m.
+    //console.log('Incoming:'+incoming);
+    let str=incoming;
+    try {
+	str=str.toLowerCase();
+	str=str.replace('a.m.','am');
+	str=str.replace('p.m.','pm');
+	str=str.replace('oclock.','');
+	str=str.replace("o'clock",'');
+	str=str.replace(',','');
+	str=str.replace('   ',' ');
+	str=str.replace('  ',' ');
+	//console.log('After stripped and stretched:'+str);
+
+	// absorb am/pm and remove it
+	let timeStr,ampm="am";
+	if (str.indexOf("pm")!=-1) ampm="pm";
+	str=str.replace("am","");
+	str=str.replace("pm","");
+
+	let mon, day, year;
+	mon=str.split(' ')[0];
+	
+	switch (mon) {
+	case 'january': mon=1; break;
+	case 'february': mon=2; break;
+	case 'march': mon=3; break;
+	case 'april': mon=4; break;
+	case 'may': mon=5; break;
+	case 'june': mon=6; break;
+	case 'july': mon=7; break;
+	case 'august': mon=8; break;
+	case 'september': mon=9; break;
+	case 'october': mon=10; break;
+	case 'november': mon=11; break;
+	case 'december': mon=12; break;
+	default:
+	    console.log('Unknown month:'+mon);
+	    return 'Unknown month '+mon;
+	}
+	//console.log('Got mon:'+mon);
+
+	str=str.substr(str.indexOf(' ')+1).trim();  // Rest of string (dateStr timeStr)
+	//console.log('Rest of dateStr is:['+str+']');
+
+	let d1=0, d2=0;
+	let h1='', h2='00';
+/*
+	parts=str.split('at');
+	let timeStr=parts[1].trim();
+	str=parts[0].trim();
+	//console.log('dateStr:['+str+']timeStr:['+timeStr+']');
+*/
+	parts=str.split(' '); 
+/*
+  Two word examples:
+  5th 1pm
+  those are clear, first one is day1 and 2nd is h1.
+  Four word examples:
+  Twenty first 12 thirty 
+  d1,d2, h1, h2
+  Three word examples:
+  case a:  20th 1 30pm   d1 h1 h2
+  case b:  20 fith 2pm   d1 d2 h1
+  If the last number is >12 then it must be case-a else case-b
+*/
+	if (parts.length==2) {
+	    d1=dayStr2Num(parts[0]);
+	    h1=dayStr2Num(parts[1]);
+	    //console.log('parts==2 d1:'+d1+' h1:'+h1);
+	}
+	else
+	    if (parts.length==4) {
+		d1=dayStr2Num(parts[0]);
+		d2=dayStr2Num(parts[1]);
+		h1=dayStr2Num(parts[2]);
+		h2=dayStr2Num(parts[3]);
+		//console.log('parts==4 d1:'+d1+' d2:'+d2+' h1:'+h1+' h2:'+h2);
+	    }
+	else {
+	    // Uhg, the 3-param case, see note above
+	    d1=dayStr2Num(parts[0]);
+	    h2=dayStr2Num(parts[2]);
+	    if (h2 > 12) {
+		// case-a
+		//console.log('Case-a');
+		h1=dayStr2Num(parts[1]);
+	    }
+	    else {
+		// Case-b
+		//console.log('Case-b');
+		d2=dayStr2Num(parts[1]);
+		//console.log('case-b trying to convert '+parts[1]+' got:'+d2);
+		h1=dayStr2Num(parts[2]);
+		h2="00";
+	    }
+	    //console.log('parts==3 d1:'+d1+' d2:'+d2+' h1:'+h1+' h2:'+h2);
+	}
+	
+	if (d1==null) {
+	    console.log('Could not translate the first part of the date '+parts[0]);
+	    return 'Could not translate the first part of the date '+parts[0];
+	}
+	if (d2==null) {
+	    console.log('Could not translate the second part of the date '+parts[0]);
+	    return 'Could not translate the second part of the date '+parts[0];
+	}
+	if (h1==null) {
+	    console.log('Could not translate the first part of the time '+parts[0]);
+	    return 'Could not translate the first part of the time '+parts[0];
+	}
+	if (h2==null) {
+	    console.log('Could not translate the second part of the time '+parts[0]);
+	    return 'Could not translate the second part of the time '+parts[0];
+	}
+	day = d1+d2;
+	timeStr=''+h1+':'+h2+' '+ampm;
+
+	year=''+new Date().getFullYear();
+	/* Let's see if they are asking for a month into next year */
+	let curMonth=new Date().getMonth()+1;
+	let intMonth=mon;
+	if (intMonth < curMonth)
+	    year=''+(parseInt(year)+1);
+
+	let dateStr=mon+'-'+day+'-'+year+' '+timeStr;
+	//console.log("Using:"+dateStr);
+	let UTC=new Date(dateStr);
+	//console.log("UTC:"+UTC);
+	//console.log("---Str:"+new Date(UTC));
+	console.log('Incoming:['+incoming+'] result:['+UTC+']');
+	return UTC;
+v
+
+    } catch (e) {
+	console.log('convertDateStr exception:',e);
+	return "Unknown exception "+e;
+    }
+}
+
+function isValidSpokenDateString(str) {
+    str=str.toLowerCase(str);
+    str=str.replace('a.m.','am');
+    str=str.replace('p.m.','am');
+//    if (str.indexOf(' at ')== -1) return "Missing the word AT.";
+    if (str.indexOf('am')== -1) return "Missing A.M. or P.M. ";
+    return null;
+}
+
+function convertSpokenDateStringInLocaleToUTC(str) {
+    let ret=isValidSpokenDateString(str);
+    if (ret) return "*************************************** "+ret;
+    console.log('convertMiscDateStringInLocaleToUTC:'+str);
+    let d=convertSpokenDateStringToUTC(str);
+    if (typeof d == 'string') return d; // Failed to convert dateStr
+    console.log('  as New Date():'+new Date(d));
+    d = d.getTime() + 4*60*60*1000;
+    let dd=new Date(); dd.setTime(d);
+    console.log('  as      shift:'+dd);
+    console.log('Minutes from now:'+(d - new Date().getTime())/1000/60);
+    return d;
+}
+
+/*
+Two word examples:
+  5th 1pm
+those are clear, first one is day1 and 2nd is h1.
+Four word examples:
+  Twenty first 12 thirty 
+d1,d2, h1, h2
+Three word examples:
+case a:  20th 1 30pm   d1 h1 h2
+case b:  20 fith 2pm   d1 d2 h1
+  If the last number is >12 then it must be case-a else case-b
+*/
+
+convertSpokenDateStr('june 15th 4pm');
+convertSpokenDateStr('June 15th 4pm');
+convertSpokenDateStr('June fifteen 4pm');
+convertSpokenDateStr('June fifteenth 4pm');
+convertSpokenDateStr('June twenty 4pm');
+convertSpokenDateStr('June 20 4pm');
+convertSpokenDateStr('June 20th  4pm');
+convertSpokenDateStr('June twenty first 4am');
+convertSpokenDateStr('June twenty too 4am');
+convertSpokenDateStr('April thirty 4am');
+convertSpokenDateStr('august 5th 1pm');
+convertSpokenDateStr('august 20th 1 30pm');
+convertSpokenDateStr('august 20 fifth 1pm');
+
+/*
 try {
     activeUsers = JSON.parse(fs.readFileSync('activeUsers.json','utf-8'));
 } catch (e) {console.log("could not read active SMS user file");}
@@ -946,6 +1262,6 @@ console.log("Starting the web server...");
 http.createServer(app).listen(port, () => {
     console.log('Express server listening on port '+port);
 });
-
+*/
 
 

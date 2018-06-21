@@ -73,12 +73,28 @@ let MyLife_Subjects = [
     "reminders": {
       "frequency": "always",
       "selections": [
-        "Dont forget to go for a walk today.",
+          "Dont forget to go for a walk today.",
+	  "Be sure to eat healthy everyday.",
+	  "Try to remember to send your loved ones a message",
+	  "Dont forget, you can use My Life to set calendar events",
+	  "Be sure to encourage others around you to try out this My Life tool",
+	  "Live life as it counts -- I never met anyone that wished they did LESS with the time they've been given.",
+	  "Dont forget to take the trash out.",
+	  "Have you booked that pestering doctor appointment yet?",
         "Your family loves you; think about that."
       ],
       "whichOne": "random1"
     },
-    "sideEffects": {
+    "calendar": [
+      {
+          "date": new Date().getTime()+2*1000*24*60*60,
+        "msg": "Dr. Smith dentist"
+      },
+      {
+          "date": new Date().getTime()+4*1000*24*60*60,
+        "msg": "Little Sally's school play "
+      }
+    ],    "Sideeffects": {
       "frequency": "always",
       "whichOne": "random1"
     },
@@ -393,30 +409,285 @@ function expect2Str(expect) {
     return words.join(", ");
 }
 
-function handleReminders(self, subject, word) {
-    let msg="";
-    console.log('handleReminders: state:'+self.attributes.state);
-    
-    if (self.attributes.state == 'Start') {
-	let plural='';
-	if (subject.interactions.reminders.selections.length>1) plural='s';
-	console.log(' ************* REMINDERS start **************');
-	// Pick a random reminder and then add it to the prefix attribute
-	msg = "You have the following reminder"+plural+": ";
-	for (let i=0; i < subject.interactions.reminders.selections.length; i++) {
-	    msg += subject.interactions.reminders.selections[i];
-	    if (i!=subject.interactions.reminders.selections.length-1)
-		msg +=' <break time="500ms"/> AND ' ;
-	}
-	msg += ' <break time="1s"/> ' ;
-	subject.interactions.reminders.selections=[];
-	updateSubjectDB(self, subject, () => {
-	    self.attributes.prefix += msg;
-	    self.attributes.state = 'Start';
-	    self.attributes.skipReminders = true;
-	    self.emit('InteractionIntent');
-	});
+
+function dayStr2Num(d1) {
+    //console.log('dayStr2Num:'+d1);
+    switch (d1) {
+    case '1':
+    case '1st':
+    case 'one':
+    case 'first': d1=1; break;
+    case '2':
+    case '2nd':
+    case 'to':
+    case 'too':
+    case 'two':
+    case 'second': d1=2; break;
+    case '3':
+    case '3rd':
+    case 'three':
+    case 'third': d1=3; break;
+    case '4':
+    case '4th':
+    case 'four':
+    case 'fourth': d1=4; break;
+    case '5':
+    case '5th':
+    case 'five':
+    case 'fifth': d1=5; break;
+    case '6':
+    case '6th':
+    case 'six':
+    case 'sixth': d1=6; break;
+    case '7':
+    case '7th':
+    case 'seven':
+    case 'seventh':
+	d1=7; break;
+    case '8':
+    case '8th':
+    case 'eight':
+    case 'eighth':
+	d1=8; break;
+    case '9':
+    case '9th':
+    case 'ninth':
+    case 'nine':
+	d1=9; break;
+    case '10':
+    case '10th':
+    case 'ten':
+    case 'tenth':
+	d1=10; break;
+    case '11':
+    case '11th':
+    case 'eleven':
+    case 'eleventh':
+	d1=11; break;
+    case '12':
+    case '12th':
+    case 'twelve':
+    case 'twelveth':
+	d1=12; break;
+    case '13':
+    case '13th':
+    case 'thirteen':
+    case 'thirteenth':
+	d1=13; break;
+    case '14':
+    case '14th':
+    case 'fourteen':
+    case 'fourteenth':
+	d1=14; break;
+    case '15':
+    case '15th':
+    case 'fifteen':
+    case 'fifteenth':
+	d1=15; break;
+    case '16':
+    case '16th':
+    case 'sixteen':
+    case 'sixteenth':
+	d1=16; break;
+    case '17':
+    case '17th':
+    case 'seventeen':
+    case 'seventeenth':
+	d1=17; break;
+    case '18':
+    case '18th':
+    case 'eighteen':
+    case 'eighteenth':
+	d1=18; break;
+    case '19':
+    case '19th':
+    case 'nineteen':
+    case 'nineteenth':
+	d1=19; break;
+    case '20':
+    case '20th':
+    case 'twenty':
+    case 'twentyth':
+	d1=20; break;
+    case '30':
+    case '30th':
+    case 'thirty':
+    case 'thirtyth':
+	d1=30; break;
+    default:
+	console.log('bad day:'+d1);
+	return null;
     }
+    return d1;
+}
+
+
+function convertSpokenDateStringToUTC(incoming) {
+    // june twenty third at three p.m.
+    //console.log('Incoming:'+incoming);
+    let str=incoming;
+    try {
+	str=str.toLowerCase();
+	str=str.replace('a.m.','am');
+	str=str.replace('p.m.','pm');
+	str=str.replace('oclock.','');
+	str=str.replace("o'clock",'');
+	str=str.replace(',','');
+	str=str.replace('   ',' ');
+	str=str.replace('  ',' ');
+	//console.log('After stripped and stretched:'+str);
+
+	// absorb am/pm and remove it
+	let timeStr,ampm="am";
+	if (str.indexOf("pm")!=-1) ampm="pm";
+	str=str.replace("am","");
+	str=str.replace("pm","");
+
+	let mon, day, year, parts;
+	mon=str.split(' ')[0];
+	
+	switch (mon) {
+	case 'january': mon=1; break;
+	case 'february': mon=2; break;
+	case 'march': mon=3; break;
+	case 'april': mon=4; break;
+	case 'may': mon=5; break;
+	case 'june': mon=6; break;
+	case 'july': mon=7; break;
+	case 'august': mon=8; break;
+	case 'september': mon=9; break;
+	case 'october': mon=10; break;
+	case 'november': mon=11; break;
+	case 'december': mon=12; break;
+	default:
+	    console.log('Unknown month:'+mon);
+	    return 'Unknown month '+mon;
+	}
+	//console.log('Got mon:'+mon);
+
+	str=str.substr(str.indexOf(' ')+1).trim();  // Rest of string (dateStr timeStr)
+	//console.log('Rest of dateStr is:['+str+']');
+
+	let d1=0, d2=0;
+	let h1='', h2='00';
+/*
+	parts=str.split('at');
+	let timeStr=parts[1].trim();
+	str=parts[0].trim();
+	//console.log('dateStr:['+str+']timeStr:['+timeStr+']');
+*/
+	parts=str.split(' '); 
+/*
+  Two word examples:
+  5th 1pm
+  those are clear, first one is day1 and 2nd is h1.
+  Four word examples:
+  Twenty first 12 thirty 
+  d1,d2, h1, h2
+  Three word examples:
+  case a:  20th 1 30pm   d1 h1 h2
+  case b:  20 fith 2pm   d1 d2 h1
+  If the last number is >12 then it must be case-a else case-b
+*/
+	if (parts.length==2) {
+	    d1=dayStr2Num(parts[0]);
+	    h1=dayStr2Num(parts[1]);
+	    //console.log('parts==2 d1:'+d1+' h1:'+h1);
+	}
+	else
+	    if (parts.length==4) {
+		d1=dayStr2Num(parts[0]);
+		d2=dayStr2Num(parts[1]);
+		h1=dayStr2Num(parts[2]);
+		h2=dayStr2Num(parts[3]);
+		//console.log('parts==4 d1:'+d1+' d2:'+d2+' h1:'+h1+' h2:'+h2);
+	    }
+	else {
+	    // Uhg, the 3-param case, see note above
+	    d1=dayStr2Num(parts[0]);
+	    h2=dayStr2Num(parts[2]);
+	    if (h2 > 12) {
+		// case-a
+		//console.log('Case-a');
+		h1=dayStr2Num(parts[1]);
+	    }
+	    else {
+		// Case-b
+		//console.log('Case-b');
+		d2=dayStr2Num(parts[1]);
+		//console.log('case-b trying to convert '+parts[1]+' got:'+d2);
+		h1=dayStr2Num(parts[2]);
+		h2="00";
+	    }
+	    //console.log('parts==3 d1:'+d1+' d2:'+d2+' h1:'+h1+' h2:'+h2);
+	}
+	
+	if (d1==null) {
+	    console.log('Could not translate the first part of the date '+parts[0]);
+	    return 'Could not translate the first part of the date '+parts[0];
+	}
+	if (d2==null) {
+	    console.log('Could not translate the second part of the date '+parts[0]);
+	    return 'Could not translate the second part of the date '+parts[0];
+	}
+	if (h1==null) {
+	    console.log('Could not translate the first part of the time '+parts[0]);
+	    return 'Could not translate the first part of the time '+parts[0];
+	}
+	if (h2==null) {
+	    console.log('Could not translate the second part of the time '+parts[0]);
+	    return 'Could not translate the second part of the time '+parts[0];
+	}
+	day = d1+d2;
+	timeStr=''+h1+':'+h2+' '+ampm;
+
+	year=''+new Date().getFullYear();
+	/* Let's see if they are asking for a month into next year */
+	let curMonth=new Date().getMonth()+1;
+	let intMonth=mon;
+	if (intMonth < curMonth)
+	    year=''+(parseInt(year)+1);
+
+	let dateStr=mon+'-'+day+'-'+year+' '+timeStr;
+	//console.log("Using:"+dateStr);
+	let UTC=new Date(dateStr);
+	//console.log("UTC:"+UTC);
+	//console.log("---Str:"+new Date(UTC));
+	console.log('Incoming:['+incoming+'] result:['+UTC+']');
+	return UTC;
+
+    } catch (e) {
+	console.log('convertDateStr exception:',e);
+	return "Unknown exception "+e;
+    }
+}
+
+function isValidSpokenDateString(str) {
+    str=str.toLowerCase(str);
+    str=str.replace('a.m.','am');
+    str=str.replace('p.m.','am');
+//    if (str.indexOf(' at ')== -1) return "Missing the word AT.";
+    if (str.indexOf('am')== -1) return "Missing A.M. or P.M. ";
+    return null;
+}
+
+
+
+
+function handleReminders(self, user, word) {
+  let msg="";
+  console.log('handleReminders: state:'+self.attributes.state);
+   
+  if (self.attributes.state == 'Start') {
+      console.log('REMINDERS start');
+      // Pick a random reminder and then add it to the prefix attribute
+      msg = "You have the following reminder: ";
+      msg += getRandom(user.interactions.reminders.selections)+', ... ' ;
+      self.attributes.prefix += msg;
+      self.attributes.state = 'Start';
+      self.attributes.skipReminders = true;
+  }
+    self.emit('InteractionIntent');
 }
 
 function handleSurveys(self, subject, word) {
@@ -948,6 +1219,200 @@ function sendSMS(self, number, message, nextFunc) {
 		);
 }
 
+function convertDateToMessage(d) {
+    let result;
+    // First, put it back to our time zone
+    console.log('convertDateToMessage incoming:'+d);
+    d = new Date(d - 4*60*60*1000);
+    console.log('convertDateToMessage in our timezone:'+d);
+    let dateStr=d.toDateString();  // Thu Jun 28 2018
+    console.log('dateStr:'+dateStr);
+    dateStr=dateStr.replace('Mon','Monday');
+    dateStr=dateStr.replace('Tue','Tuesdayy');
+    dateStr=dateStr.replace('Wed','Wednesday');
+    dateStr=dateStr.replace('Thu','Thursday');
+    dateStr=dateStr.replace('Fri','Friday');
+    dateStr=dateStr.replace('Sat','Saturday');
+    dateStr=dateStr.replace('Sun','Sunday');
+
+    dateStr=dateStr.replace('Jan','January');
+    dateStr=dateStr.replace('Feb','February');
+    dateStr=dateStr.replace('Mar','March');
+    dateStr=dateStr.replace('Apr','April');
+    dateStr=dateStr.replace('May','May');
+    dateStr=dateStr.replace('Jun','June');
+    dateStr=dateStr.replace('Jul','July');
+    dateStr=dateStr.replace('Aug','August');
+    dateStr=dateStr.replace('Sep','September');
+    dateStr=dateStr.replace('Oct','October');
+    dateStr=dateStr.replace('Nov','November');
+    dateStr=dateStr.replace('Dec','December');
+
+    dateStr=dateStr.replace('2018','');
+    dateStr=dateStr.replace('2019','');
+    dateStr=dateStr.replace('2020','');
+    dateStr+=' <break time="300ms"/>';
+
+    let diff=d - new Date();
+    let daysFromNow=Math.round(diff/1000/60/60/24);
+    if (daysFromNow) {
+	dateStr+=' '+daysFromNow+' days from now <break time="300ms"/> ';
+    }
+    
+    console.log('adjusted dateStr:'+dateStr);
+    result = ' On '+dateStr+' at ';
+    let timeStr=d.toLocaleTimeString(); // 20:10:00
+    let parts=timeStr.split(':');
+    let ampm=' a.m. '
+    if (parseInt(parts[0])>=12) ampm=' p.m. ';
+    if (parseInt(parts[0])>12) parts[0]=parseInt(parts[0])-12;
+    result += parts[0]+' '+parts[1]+ampm;
+    console.log('Result:'+result);
+    return result;
+}
+
+function handleCalendar(self, subject, word) {
+   console.log('handleCalendars: state:'+self.attributes.state);
+   
+   if (self.attributes.state == 'Start') {
+       self.attributes.skipCalendar = true;
+       console.log('************** CALENDAR start **************');
+       /* First, sort the events */
+       self.attributes.calendar=_.sortBy(subject.interactions.calendar, (o)=> {
+	   return o.date;
+       });
+       console.log('Sorted array:',self.attributes.calendar);
+       /* Now, find events that are AFTER 'now' */
+       let msg='';
+       let now=new Date().getTime();
+       let count=0;
+       _.forEach(self.attributes.calendar, (event) => {
+	   console.log('Checking now '+now+' vs '+event.date);
+	   // WARNING: We should delete any events that have passed and then save!
+	   if (typeof event.date == 'string')
+	       event.date = new Date(event.date).getTime();
+	   if (event.date >= now && count < 3) {
+	       if (msg=='') msg='You have the following calendar events <break time="500ms"/> ';
+	       else msg+=' <break time="250ms"/> and <break time="250ms"/> ';
+	       msg+=convertDateToMessage(event.date);
+	       msg+=' <break time="250ms"/> '+event.msg;
+	       msg+=' <break time="750ms"/>';
+	       count++;
+	   }
+       });
+       msg+=' <break time="750ms"/>';
+       self.attributes.prefix += msg;
+       self.emit('InteractionIntent');
+       return;
+   }
+}
+
+function handleEvent(self, subject, word) {
+    word=word.value.toLowerCase();
+    console.log('handleEvent: state:'+self.attributes.state+' word:'+word);
+   
+    if (self.attributes.state == 'Start') {
+	console.log('************** EVENT start **************');
+	self.attributes.state = 'EventResponse';
+	self.attributes.skipEvent = true;
+	console.log('Asking if they want to set a new event...');
+	self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+
+		  ' Would you like to set a new calendar event?',"Please say yes or no.");
+	return;
+    }
+
+    if (self.attributes.state == 'EventResponse') {
+	if (word=='no') {
+	    self.attributes.state = 'Start';
+	    self.emit('InteractionIntent');
+	    return;
+	}
+	self.attributes.state = 'EventGetDate';
+	console.log('Asking for a date...');
+	self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+
+		  ' Please say the date and time. '+
+		  ' You can say something like this <break time="250ms"/> '+
+		  ' July 28th 3:30pm <break time="300ms"/> ',
+		  "Please say a full date or say stop.");
+	return;
+    }
+
+    if (self.attributes.state == 'EventGetDate') {
+	self.attributes.state = 'EventGetEvent';
+	if (word.indexOf('stop')!=-1 ||
+	    word.indexOf('no')!=-1 ||
+	    word.indexOf('cancel')!=-1) {
+	    self.attributes.prefix += 'Ok, maybe another time.<break time="200ms"/>';
+	    self.emit('InteractionIntent');
+	}
+	console.log('Asking for a msg...');
+
+	let ret=isValidSpokenDateString(word);
+	if (ret) {
+	    self.attributes.prefix+=ret;
+	    self.attributes.state = 'Start';
+	    self.emit('InteractionIntent');
+	    return;
+	}
+	let d=convertSpokenDateStringToUTC(word);
+	if (typeof d == 'string') {
+	    self.attributes.prefix+=d;
+	    self.attributes.state = 'Start';
+	    self.emit('InteractionIntent');
+	    return;
+	}
+	let dateStr="";
+	let months=[
+	    "January","February","March","April","May","June",
+	    "July","August","September","October","November","December"
+	];
+	dateStr+=months[d.getUTCMonth()]+' ';
+	dateStr+=d.getUTCDate()+' ';
+	let ampm="a.m.";
+	let hh=d.getUTCHours();
+	if (hh>=12) ampm="p.m.";
+	if (hh>12) hh -= 12;
+	let mm=d.getUTCMinutes();
+	if (mm==0) mm=""
+	dateStr+=hh+" "+mm+" "+ampm+' <break time="300ms"/> ';
+	self.attributes.prefix += 'Registering event for '+dateStr;
+	d = d.getTime() + 4*60*60*1000;
+	let dd=new Date(); dd.setTime(d);
+	self.attributes.eventDate = dd;
+	self.attributes.state = 'EventGetMessage';
+	self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+
+		  ' Please say a short message to describe the event or say cancel. ',
+		  ' Please say a short message to describe the event. ');
+	return;
+    }
+
+    if (self.attributes.state == 'EventGetMessage') {
+	self.attributes.state = 'Start';
+	if (word.indexOf('stop')!=-1 ||
+	    word.indexOf('no')!=-1 ||
+	    word.indexOf('cancel')!=-1) {
+	    self.attributes.prefix += 'Event not set. <break time="300ms"/> ';
+	    self.emit('InteractionIntent');
+	    return;
+	}
+	addCalendar(self, subject, {date:self.attributes.eventDate, msg:word}, (err,data) => {
+	    if (err) self.attributes.prefix +=' Failed database addition '+err;
+	    else self.attributes.prefix +=' Added successfully. <break time="300ms"> ';
+	    self.emit('InteractionIntent');
+	    return;
+	});
+    }
+}
+
+function addCalendar(self, subject, calendar, nextFunc) {
+    if (!subject.interactions.calendar) subject.interactions.calendar=[];
+    subject.interactions.calendar.push(calendar);
+    updateSubjectDB(self, subject, (self, err, data) => {
+	console.log("Update err:",err);
+	nextFunc(err);
+    });
+}
+
 function handleMessages(self, subject, word) {
    console.log('handleMessages: state:'+self.attributes.state);
    
@@ -960,10 +1425,13 @@ function handleMessages(self, subject, word) {
       for (let i=0; i < subject.interactions.messages.length && i < max; i++) 
         people[subject.interactions.messages[i].from]=true;
       let peopleArray=Object.keys(people);
-      for (let i=0; i < peopleArray.length && i < max; i++) 
-        from+=peopleArray[i] + ", ";
+       for (let i=0; i < peopleArray.length && i < max; i++)  {
+	   if ((i==max -1 || i==peopleArray.length-1) && i!=0)
+	       from+=' and ';  // put 'and' before the last name mentioned
+           from+=peopleArray[i] + ", ";
+       }
        console.log("Messages from:"+from);
-      from+=" Would you like to hear them now?";
+      from+=' <break time="250ms"/> Would you like to hear them now?';
       self.attributes.state = 'MessagesResponse';
       self.attributes.msgnum = -1;
       self.attributes.skipMessages = false;
@@ -1373,11 +1841,8 @@ const handlers = {
 	  if (!this.attributes.skipAnnounce)
 	      return handleAnnounce(this, subject, word);
 
-        if (subject.interactions.reminders && subject.interactions.reminders.selections && subject.interactions.reminders.selections.length && !this.attributes.skipReminders)   
-          return handleReminders(this, subject, word); 
-	  
-
-
+          if (subject.interactions.calendar && subject.interactions.calendar.length && !this.attributes.skipCalendar)   
+          return handleCalendar(this, subject, word);
         if (subject.interactions.messages && subject.interactions.messages.length && !this.attributes.skipMessages)   
           return handleMessages(this, subject, word);
         if (subject.core.medications && subject.core.medications.length && !this.attributes.skipMeds)   
@@ -1392,9 +1857,12 @@ const handlers = {
 	      return handleWeather(this);
 	  if (!this.attributes.skipNews) 
 	      return handleNews(this, subject, word);
+          if (!this.attributes.skipEvent)
+	      return handleEvent(this, subject, word);
       }
       
-      if (this.attributes.state.startsWith('Reminder')) return handleReminder(this, subject, word);
+      if (this.attributes.state.startsWith('Event')) return handleEvent(this, subject, word); 
+      if (this.attributes.state.startsWith('Calendar')) return handleCalendar(this, subject, word); 
       if (this.attributes.state.startsWith('Announce')) return handleAnnounce(this, subject, word); 
       if (this.attributes.state.startsWith('SendMessage')) return handleSendMessage(this, subject, word);
       if (this.attributes.state.startsWith('Weather')) return handleWeather(this, subject, word);
