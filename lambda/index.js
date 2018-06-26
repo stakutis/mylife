@@ -50,7 +50,7 @@ let MyLife_Subjects = [
       "medications": ["atenolol","oxybutynin","metformin"]
   },
   "deviceID": "null",
-  "ID": "SystemDemo1",
+  "ID": "SystemDemo",
   "interactions": {
     "completedSideEffects": [
       {
@@ -454,16 +454,19 @@ function dayStr2Num(d1) {
     case 'ninth':
     case 'nine':
 	d1=9; break;
+    case "'10":  // No idea why it comes in this way
     case '10':
     case '10th':
     case 'ten':
     case 'tenth':
 	d1=10; break;
+    case "'11":  // No idea why it comes in this way
     case '11':
     case '11th':
     case 'eleven':
     case 'eleventh':
 	d1=11; break;
+    case "'12":  // No idea why it comes in this way
     case '12':
     case '12th':
     case 'twelve':
@@ -667,7 +670,7 @@ function isValidSpokenDateString(str) {
     str=str.replace('a.m.','am');
     str=str.replace('p.m.','am');
 //    if (str.indexOf(' at ')== -1) return "Missing the word AT.";
-    if (str.indexOf('am')== -1) return "Missing A.M. or P.M. ";
+    if (str.indexOf('am')== -1) return 'Missing A.M. or P.M. <break time="300ms"/> ';
     return null;
 }
 
@@ -682,7 +685,7 @@ function handleReminders(self, user, word) {
       console.log('REMINDERS start');
       // Pick a random reminder and then add it to the prefix attribute
       msg = "You have the following reminder: ";
-      msg += getRandom(user.interactions.reminders.selections)+', ... ' ;
+      msg += getRandom(user.interactions.reminders.selections)+'. <break time="250ms"/> ' ;
       self.attributes.prefix += msg;
       self.attributes.state = 'Start';
       self.attributes.skipReminders = true;
@@ -1188,14 +1191,14 @@ function isAQuestion(msg) {
     console.log('isAQuestion ['+msg+']');
     msg = msg.trim().toLowerCase();
     if (msg.slice(-1)=='?') return true;
-    if (msg.indexOf('do')!=-1) return true;
-    if (msg.indexOf('tell')!=-1) return true;
-    if (msg.indexOf('what')!=-1) return true;
-    if (msg.indexOf('how')!=-1) return true;
-    if (msg.indexOf('are')!=-1) return true;
-    if (msg.indexOf('will')!=-1) return true; 
-    if (msg.indexOf('when')!=-1) return true;
-    if (msg.indexOf('why')!=-1) return true;
+    if (msg.indexOf('do')==0) return true;
+    if (msg.indexOf('tell')==0) return true;
+    if (msg.indexOf('what')==0) return true;
+    if (msg.indexOf('how')==0) return true;
+    if (msg.indexOf('are')==0) return true;
+    if (msg.indexOf('will')==0) return true; 
+    if (msg.indexOf('when')==0) return true;
+    if (msg.indexOf('why')==0) return true;
     console.log('...is false');
     return false;
 }
@@ -1307,6 +1310,68 @@ function handleCalendar(self, subject, word) {
    }
 }
 
+function handleProfile(self, subject, word) {
+   console.log('handleProfile: state:'+self.attributes.state);
+   
+   if (self.attributes.state == 'Start') {
+       self.attributes.skipProfile = true;
+       console.log('************** PROFILE start **************');
+       // First, check for zip-code
+       if (!subject.contact.zipcode) {
+	   let msg="Hey "+subject.contact.firstName+", I see that we dont have your zipcode on file. "+
+	       '<break time="300ms"/> We need the zipcode so that timezones and the weather report '+
+	       'work correctly. <break time="300ms"/> What is your zipcode?';
+	   console.log("Soliciting for zipcode");
+	   self.attributes.state = "ProfileGetZipcode";
+	   self.emit(':elicitSlot','RandomWordSlot',
+		     getPrefix(self)+msg,"Please tell me your zipcode.");
+	   return;
+       }
+       self.emit('InteractionIntent');
+       return;
+   }
+
+    if (self.attributes.state == 'ProfileGetZipcode') {
+	word = word.value.trim();
+	console.log("Received zipcode:"+word);
+	let url="http://www.zipcodeapi.com/rest/GqxUqSkUvME4LFo44IDsdpcY4evmcltUruJwDuSC847lnTRGC5TKzuzxb6HuhUw8/info.json/"+word+"/degrees";
+	request(url,(err, data) => {
+	    console.log('Zipcode lookup result:',err);
+	    if (err) {
+		self.emit(':elicitSlot','RandomWordSlot',
+			  getPrefix(self)+"Sorry, I couldn't find that zip code "+word+", Please say it again?","Please tell me your zipcode.");
+		return;
+	    }
+	    data = data.body;
+	    if (typeof data == 'string') data=JSON.parse(data);
+	    if (data.error_code) {
+		console.log('Error zipcode data is:',data);
+		self.emit(':elicitSlot','RandomWordSlot',
+			  getPrefix(self)+"Sorry, I couldn't find that zip code "+word+", Please say it again?","Please tell me your zipcode.");
+		return;
+	    }
+	    self.attributes.prefix += 'Thank you!<break time="250ms"/> I will use zip code '+word+
+		' Which is city '+data.city+' and time zone '+data.timezone.timezone_abbr+'. '+
+		' <break time="500ms"/> ';;
+	    subject.contact.zipcode=word;
+	    subject.contact.city=data.city;
+	    subject.contact.state=data.state;
+	    subject.contact.timezone=data.timezone;
+	    updateSubjectAttributeOnly(self, subject.ID, 
+				       subject.contact,
+				       "contact", (self, err, data) => {
+					   console.log('update result:',err);
+					   self.attributes.state = "Start";
+					   self.emit('InteractionIntent');
+				       });
+	    return;
+	});
+	return;
+    }
+
+}
+
+
 function handleEvent(self, subject, word) {
     word=word.value.toLowerCase();
     console.log('handleEvent: state:'+self.attributes.state+' word:'+word);
@@ -1350,14 +1415,15 @@ function handleEvent(self, subject, word) {
 	let ret=isValidSpokenDateString(word);
 	if (ret) {
 	    self.attributes.prefix+=ret;
-	    self.attributes.state = 'Start';
+	    self.attributes.state = 'EventResponse';
 	    self.emit('InteractionIntent');
 	    return;
 	}
 	let d=convertSpokenDateStringToUTC(word);
 	if (typeof d == 'string') {
-	    self.attributes.prefix+=d;
-	    self.attributes.state = 'Start';
+	    self.attributes.prefix+=d+' <break time="250ms"/>';
+	    self.attributes.state = 'EventResponse';
+	    //self.attributes.state = 'Start';
 	    self.emit('InteractionIntent');
 	    return;
 	}
@@ -1381,7 +1447,7 @@ function handleEvent(self, subject, word) {
 	self.attributes.eventDate = dd;
 	self.attributes.state = 'EventGetMessage';
 	self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+
-		  ' Please say a short message to describe the event or say cancel. ',
+		  ' Please say a short message to describe the event or say stop. ',
 		  ' Please say a short message to describe the event. ');
 	return;
     }
@@ -1397,7 +1463,7 @@ function handleEvent(self, subject, word) {
 	}
 	addCalendar(self, subject, {date:self.attributes.eventDate, msg:word}, (err,data) => {
 	    if (err) self.attributes.prefix +=' Failed database addition '+err;
-	    else self.attributes.prefix +=' Added successfully. <break time="300ms"> ';
+	    else self.attributes.prefix +=' Added successfully. <break time="300ms"/> ';
 	    self.emit('InteractionIntent');
 	    return;
 	});
@@ -1529,7 +1595,12 @@ function handleSetup(self) {
 	    msg="Oh oh, you asked for setup so your current session is now stopped. "+
 	    "<break time='300ms'/>";
         self.emit(':elicitSlot',"NumberSlot",msg+
-		  "Welcome to setup and say your temporary device I.D. or say STOP?",
+		  "Welcome to My Life's setup! "+
+		  '<break time="300ms"/>'+
+		  " Say your temporary device I.D. or say STOP. "+
+		  "If you dont have an I.D. then please visit Whole Health Plus Technology dot com "+
+		  'and request an account. <break time="300ms"/> Please say your temporary I.D. , one '+
+		  "digit at a time.",
 		  "Please say your device I.D. number.");
 	console.log('Request sent to alexa');
 	return;
@@ -1547,11 +1618,6 @@ function handleSetup(self) {
 		    self.emit(':tell',"Your device I.D. number "+self.attributes.setupDeviceID+" is not known. Please start over.");
 		    return;
 		}
-		// if (data.length > 1) {
-		//   self.emit(':tell',"Detected multiple Subject accounts with that device I.D. of "+
-		//     self.attributes.setupDeviceID+", please contact MyLife support.");
-		//   return;
-		// }
 		let subject = data[0];
 		subject.deviceID = self.event.context.System.device.deviceId;
 		updateSubjectAttributeOnly(self, subject.ID, subject.deviceID, "deviceID",(self,err,data) => {
@@ -1560,8 +1626,15 @@ function handleSetup(self) {
 			return;
 		    }
 		    console.log('Set subject.deviceID to :'+subject.deviceID);
-		    self.emit(':tell',"Thank you, you chose the patient "+subject.contact.firstName+
-			      ". Setup is complete now, let the patient enjoy the application!");
+		    sendSMS(self, '+19787643488', 'mylife: '+subject.ID+' ACTIVATED!', () => {
+			self.emit(':tell',
+			      'Thank you, '+subject.contact.firstName+'. <break time="300ms"/> '+
+			      'To run the application simply say <break time="250ms"/> Alexa, start My Life. '+
+			      ' <break time="250ms"/>  If you need any help, please submit a note '+
+			      ' on our web site, Whole Health Plus Technology dot com. <break time="300ms"/>'+
+			      'Setup is complete now, enjoy the application and remember: '+
+				  '<break time="250ms"/> Stay Connected To Life!');
+		    });
 		});
             });
 	}
@@ -1639,13 +1712,13 @@ function handleWeather(self, subject, word) {
 	    self.attributes.state = 'Start';
 	    return self.emit('InteractionIntent');
 	}
-	request("https://api.wunderground.com/api/587d331e9dd343e3/forecast/q/MA/Boston.json",(err, data) => {
+	request("https://api.wunderground.com/api/587d331e9dd343e3/forecast/q/"+subject.contact.zipcode+".json",(err, data) => {
 	    let weather="";
 	    if (err) weather="Error getting weather: "+err;
 	    else {
 		data=JSON.parse(data.body);
 		let ary=data.forecast.txt_forecast.forecastday;
-		weather+="The weather for today "+ary[0].title+" is "+ary[0].fcttext+", ...";
+		weather+="The weather for "+subject.contact.city+" today "+ary[0].title+" is "+ary[0].fcttext+", ...";
 		weather+="The weather for "+ary[1].title+" is "+ary[1].fcttext+", ...";
 		weather = weather.replace(/F./g,".");
 		weather = weather.replace(/mph./g,"mph. , ");
@@ -1674,15 +1747,23 @@ function handleWeather(self, subject, word) {
 function handleAnnounce(self, subject, word) {
     console.log("******** Handle Announce ******");
     self.attributes.skipAnnounce=true;
-//    if (subject.ID == "Brenda")
     console.log("Sending message to stakutis about starting patient "+subject.ID);
     {
-	sendSMS(self, '+19787643488', subject.ID+' signed in', () => {
-	    self.emit('InteractionIntent');	    
+	sendSMS(self, '+19787643488', 'mylife: '+subject.ID+' signed in', () => {
+	    console.log('Updating the patients login-time...');
+	    let d=new Date();
+	    subject.interactions.lastLogin={
+		str: d.toISOString(),
+		gmt: d.getTime(),
+		bostonTime: new Date(d.getTime()-4*60*60*1000).toLocaleString()
+	    };
+	    updateSubjectAttributeOnly(self, subject.ID, subject.interactions.lastLogin,
+				       "interactions.lastLogin",(self,err,data) => {
+					   console.log('Result of updating login:',err);
+					   self.emit('InteractionIntent');
+				       });
 	});
-	return;
     }
-    self.emit('InteractionIntent');
 }
 
 function handleNews(self, subject, word) {
@@ -1779,11 +1860,15 @@ const handlers = {
 		console.log('Device not found');
 		this.emit(
 		':tell',
-		"Welcome. I see that your device is not yet associated with a MyLife account. "+
-		    "You can get an account at W W W dot Whole Life Plus Technology dot com. "+
-		    "If you have a 4 digit device code, please say:, Alexa tell My Life Setup. "+
-		    "Or, if you want to demo and play with this skill please say: Alexa "+
-		    "tell My Life demo.");
+		    "Welcome. I see that your device is not yet associated with a My Life account. "+
+			"You can get an account at W W W dot Whole Health Plus Technology dot com. "+
+			' <break time="250ms"/> '+
+			"If you have a 4 digit device code, please say:, Alexa tell My Life Setup. "+
+			' <break time="250ms"/> '+
+			"Or, if you want to demo and play with this skill please say: "+
+			' <break time="200ms"/> '+
+			"Alexa "+
+			"tell My Life demo.");
 				       }
           else {
             console.log("Retieved subject:",data[0]);
@@ -1841,8 +1926,11 @@ const handlers = {
 	  if (!this.attributes.skipAnnounce)
 	      return handleAnnounce(this, subject, word);
 
+	  if (!this.attributes.skipProfile)
+	      return handleProfile(this, subject, word);
+	  
           if (subject.interactions.calendar && subject.interactions.calendar.length && !this.attributes.skipCalendar)   
-          return handleCalendar(this, subject, word);
+              return handleCalendar(this, subject, word);
         if (subject.interactions.messages && subject.interactions.messages.length && !this.attributes.skipMessages)   
           return handleMessages(this, subject, word);
         if (subject.core.medications && subject.core.medications.length && !this.attributes.skipMeds)   
@@ -1861,6 +1949,7 @@ const handlers = {
 	      return handleEvent(this, subject, word);
       }
       
+      if (this.attributes.state.startsWith('Profile')) return handleProfile(this, subject, word); 
       if (this.attributes.state.startsWith('Event')) return handleEvent(this, subject, word); 
       if (this.attributes.state.startsWith('Calendar')) return handleCalendar(this, subject, word); 
       if (this.attributes.state.startsWith('Announce')) return handleAnnounce(this, subject, word); 

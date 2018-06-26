@@ -69,8 +69,6 @@ function findUserByPhone(phone, nextFunction) {
       ExpressionAttributeValues: {
 	  ":phone":phone}
   };
-  console.log('scanning with params:',params);
-//  docClient.get(params, (err, data) => {
   docClient.scan(params, (err, data) => {
         if (err) {
             console.error("Unable to read item. Error JSON:", err);
@@ -96,7 +94,6 @@ function findSubjectAttributeOnly(ID, attribute, nextFunction) {
         ConsistentRead: false,
         ReturnConsumedCapacity: "TOTAL"
   };
-  console.log('scanning with params:',params);
   docClient.get(params, (err, data) => {
         if (err) {
             console.error("Unable to read item. Error JSON:", err);
@@ -122,7 +119,6 @@ function messageFriends(respondTo, subjectID, msg) {
             ':subjectID': subjectID
         },
     };
-    console.log('scanning with params:',params);
     docClient.scan(params, (err, data) => {
         if (err) {
             console.error("Unable to read item. Error JSON:", err);
@@ -149,7 +145,6 @@ function findSubject(ID, nextFunction) {
         Key: {"ID":ID},
         ConsistentRead: false
   };
-  console.log('scanning with params:',params);
   docClient.get(params, (err, data) => {
         if (err) {
             console.error("Unable to read item. Error JSON:", err);
@@ -168,7 +163,6 @@ function updateSubject(ID, data, nextFunction) {
       TableName: 'MyLife_Subjects',
       Item : data
   };
-  console.log('scanning with params:',params);
   docClient.put(params, (err, data) => {
         if (err) {
             console.error("Unable to update item. Error JSON:", err);
@@ -192,7 +186,6 @@ function updateSubjectAttributeOnly(ID, data, attribute, nextFunction) {
         UpdateExpression: "set "+attribute+" = :r",
         ExpressionAttributeValues: { ":r":data}
   };
-  console.log('scanning with params:',params);
   docClient.update(params, (err, data) => {
         if (err) {
             console.error("Unable to update item. Error JSON:", err);
@@ -350,7 +343,7 @@ function addReminder(subjectID, reminder, nextFunc) {
 	console.log('err:',err,' subject:',subject);
 	subject.interactions.reminders.selections.push(reminder);
 	updateSubject(subjectID, subject, (err, data) => {
-	    console.log("Update err:",err);
+	    console.log("addreminder-updateSubject err:",err);
 	    nextFunc(err);
 	});
     });
@@ -379,15 +372,17 @@ function addCalendar(subjectID, calendar, nextFunc) {
     });
 }
 
-function handleMyLifeCommand(req, user, subjectID) {
+function handleMyLifeCommand(req, res, user, subjectID) {
     // Let's first see if this is a "command" to mylife instead of just a msg to a subject
     let words=req.body.Body.split(" ");
     console.log('handleMyLifeCommand: words[0]:'+words[0]);
-    if (!words.length || words[0].toLowerCase()!='mylife') return false;
+    if (!words.length || words[0].toLowerCase()!='mylife')
+	return false;
+
     // Its a command for us
     console.log("Got a 'mylife' command");
     if (words.length == 1) {
-	sendSMS(req.body.From,"Hi. After 'mylife' you can say one-of: friend, reminder, survey, event.");
+	sendSMS(req.body.From,"Hi. After 'mylife' you can say one-of: reminder, survey, event, or add (to add you as a care-circle member to another patient/user).");
 	return true;
     }
     switch (words[1].toLowerCase()) {
@@ -398,6 +393,7 @@ function handleMyLifeCommand(req, user, subjectID) {
 	    let reminder="";
 	    for (let i=2; i<words.length; i++) reminder+=words[i]+" ";
 	    addReminder(subjectID, reminder, (err) => {
+		console.log("addReminder result:"+err);
 		if (!err) sendSMS(req.body.From,"Reminder added; thank-you!");
 		else sendSMS(req.body.From,"Failed, database error:"+err);
 	    });
@@ -441,6 +437,35 @@ function handleMyLifeCommand(req, user, subjectID) {
 	    }
 	}
 	break;
+    case 'add':
+	console.log("Adding me to another patient");
+	if (words.length != 3)
+	    sendSMS(req.body.From,"Hi. After 'mylife add' please write the patient/user's acct name.");
+	else {
+	    let subjectID=words[2].toLowerCase();
+	    console.log('Target subject is:',subjectID);
+	    findSubject(subjectID, (err, subject) => {
+		console.log('err:',err, ' valid? ',subject!=null);
+		if (err || !subject) sendSMS(req.body.From,"Sorry, I was unable to find that patient/user by that account name "+subjectID+".");
+		else {
+		    let phone=req.body.From+"-"+subjectID;
+		    console.log('Creating a new user with this phone-code:',phone);
+		    updateUser(phone, user.contact.firstName, subjectID,(err, data) => {
+			if (err) {
+			    console.log('Error adding/creating a new user to an existing patient:',err);
+			    sendSMS(req.body.From,"Sorry, I was unable assign you to that user, error is:"+err);
+			}
+			else
+			    sendSMS(req.body.From,"All set! BUT, now you have more than one My Life "+
+				    "user that you are managing. SO, each time you send a message "+
+				    "MyLife will ask you which user you desire. Try it out, it's "+
+				    
+				    "not too bad, and good-for-you helping more than just one person!"+err);
+		    });
+		}
+	    });
+	}
+	break;
     case 'friend':
 	console.log("Adding a friend");
 	if (words.length != 4)
@@ -461,21 +486,38 @@ function handleMyLifeCommand(req, user, subjectID) {
     default:
 	sendSMS(req.body.From,"Hi. I didn't understand. After 'mylife' you can say one-of: friend, reminder, survey, appointment/event.");
     }
-    
     return true;
 }
 
-function createSubject(subjectID, notifyNumber) {
+function getRandomNumber(range) {
+    return  Math.floor(Math.random() * range);
+}
+
+function createSubject(req, firstName) {
+    let r=getRandomNumber(9900)+100;  /* 100...9,9999 */
+    let subjectID = firstName + r;
     console.log("Creating subject "+subjectID);
-    // First copy 'ChrisDemo1'
-    findSubject('ChrisDemo1', (err, subject) => {
-	console.log('err:',err,' subject:',subject);
+    // First copy 'NewUser'
+    findSubject('NewUser', (err, subject) => {
+	console.log('err:',err, subject);
+	if (err) {
+	    sendSMS(req.body.From,'Failed to find the base NewUser object! Err:'+err);
+	}
 	subject.ID = subjectID;
-	subject.contact.firstName = subjectID;
-	subject.deviceID = '1234'
+	subject.contact.firstName = firstName;
+	let d=new Date();
+	subject.contact.dateCreated={
+		str: d.toISOString(),
+		gmt: d.getTime(),
+		bostonTime: new Date(d.getTime()-4*60*60*1000).toLocaleString()
+	};
+	subject.deviceID = ''+r;
 	updateSubject(subjectID, subject, (err, data) => {
 	    console.log("Update err:",err);
-	    sendSMS(notifyNumber,'Result of add:'+err+' device temporary ID is '+subject.deviceID);
+	    if (err) {
+		sendSMS(req.body.From,'FAILED! Result of add:'+err);
+	    }
+	    sendSMS(req.body.From, 'SUCCESS. New SubjectID:'+subjectID+' temporary device ID is '+subject.deviceID);
 	});
     });
 }
@@ -495,72 +537,42 @@ function updateSubjectAttributes(req, words) {
     }
 }
 
-function handleMyLifeSystemCommand(req) {
+function handleMyLifeSystemCommand(req, res) {
     console.log('handleMyLifeSystemCommand: Body:'+req.body.Body);
+    // MyLife system commands start with 'cjs' or 'system'
     let words=req.body.Body.split(" ");
     let subjectID=words[2];
     console.log('!!handleMyLifeSystemCommand: words[0]='+words[0]);
-    if (!words.length || words[0].toLowerCase()!='cjs') return false;
+    
+    if (!words.length || (words[0].toLowerCase()!='cjs' && words[0].toLowerCase()!='system')) return false;
     // Its a command for us
     console.log("Got a 'mylife' SYSTEM command");
     if (words.length == 1) {
-	sendSMS(req.body.From,"Hi. After 'cjs' you can say 'subject' plus subjectID plus 'create' or attribute=value --OR-- "+
-	   "You can say 'friend' plus subjectID firstName phone --OR-- 'blast' plus subjectID message-to-friends .");
-	return true;
+	sendSMS(req.body.From,"Hi. After '"+words[0]+"' you can say 'create' plus the new users first name. (More commands forthcoming)");
     }
+    else
     switch (words[1].toLowerCase()) {
-    case 'friend':
-	if (words.length != 5) {
-	    sendSMS(req.body.From,"Missing values(s). Expected either 'cjs friend subjectID firstName phone");
+    case 'create':
+	if (words.length != 3) {
+	    sendSMS(req.body.From,"Missing values(s). Expected the new user's first name.");
 	    break;
 	}
-	let firstName=words[3];
-	let phone=makeValidPhone(words[4]);
-	updateUser(phone, firstName, subjectID, (err, data) => {
-	    if (!err) {
-		sendSMS(req.body.From,"Added friend, firstName="+firstName+" phone="+phone+" tied to subject:"+subjectID);
-		sendSMS(phone,"Greetings. You've been added as a MyLife Friend to "+subjectID+". Save this phone number. Use it to send messages to your friend.");
-	    }
-	    else
-		sendSMS(req.body.From,"Error adding friend, err:"+err);
-	});
-	break;
-    case 'subject':
-	if (words.length < 4) {
-	    sendSMS(req.body.From,"Missing values(s). Expected either 'subjectID create' or 'subjectID key=value'");
-	    break;
-	}
-	if (words[3].toLowerCase()=='create')
-	    createSubject(subjectID,req.body.From);
-	else
-	    updateSubjectAttributes(req, words);
-	break;
-    case 'blast':
-	if (words.length < 4) {
-	    sendSMS(req.body.From,"Missing values(s). Expected either 'subjectID msg-to-friends'");
-	    break;
-	}
-	msg=words.slice(2);
-	messageFriends(req.body.From,subjectID, msg.join(" "));
+	let firstName=words[2].toLowerCase();
+	createSubject(req, firstName);
 	break;
     default:
 	sendSMS(req.body.From,"Sorry, unknown key word:"+words[1]);
     }
+    res.writeHead(200, {'Content-Type': 'text/xml'});
+    res.end();
     return true;
 }
 
 
-
-
-
-
-app.post('/sms', (req, res) => {
-    console.log('Hey, we got some message! From:',req.body.From+' msg:'+req.body.Body);
-
-    req.body.Body=req.body.Body.trim(); // Remove leading/trailing spaces
-    // First, let's see if the in-coming phone is stakutis or batulis AND is a command
+function isBatulisTest(req, res) {
+    let done=false;
     if (req.body.From == '+19787643488' || req.body.From == '+16128023116') {
-	let done=true;
+	done=true;
 	console.log('Got a message from Stakutis or Batulis');
 	let parts=req.body.Body.split(" ");
 	parts[0]=parts[0].toLowerCase();
@@ -596,77 +608,180 @@ app.post('/sms', (req, res) => {
 	}
 	console.log('Continuing...');
     }
-    // Next, see if the in-coming phone is an SMS user; if so process, else process as MyLife
-    const user=activeUsers[req.body.From];
-    if (user)
-	handleSMSSurvey(user, req.body.Body);
-    else
-	if (!handleMyLifeSystemCommand(req)) {
-	    if (awaitChoice[req.body.From]) {
-		// First make sure not timed-out
-		console.log("We are in awaitChoice...checking if timed out; Now="+new Date().getTime()+' vs '+awaitChoice[req.body.From].time);
-		if (new Date().getTime() - awaitChoice[req.body.From].time > 15*1000) {
-		    console.log('awaitChoice timed out, removing')
-		    awaitChoice[req.body.From]=null;
-		}
-		else {
-		    req.body.Body=req.body.Body.trim().toLowerCase();
-		    console.log("Looking for patient:"+req.body.Body);
-		    for (let i=0; i<awaitChoice[req.body.From].users.length; i++) {
-			console.log('comparing ['+awaitChoice[req.body.From].users[i].subjectID.toLowerCase()+'] to ['+
-				    req.body.Body+']');
-			if (awaitChoice[req.body.From].users[i].subjectID.toLowerCase() ==
-			    req.body.Body) {
-			    let user=awaitChoice[req.body.From].users[i];
-			    console.log('Found patient! '+awaitChoice[req.body.From].users[i].subjectID);
-			    req.body.Body = awaitChoice[req.body.From].msg; // hack; so handleMyLifeCommand has the original
-			    if (!handleMyLifeCommand(req, user, user.subjectID))  {
-				sendMessageToPatient(
-				    user.subjectID,
-				    user.contact.firstName,
-				    req.body.From,
-				    awaitChoice[req.body.From].msg);
-				sendSMS(req.body.From,"Message sent to "+awaitChoice[req.body.From].users[i].subjectID);
-			    }
-			    awaitChoice[req.body.From]=null;
-			    return;
-			}
-		    }
-		    console.log('Cound not find the patient!');
-		    sendSMS(req.body.From,"Patient "+req.body.Body+" not found; try again.");
-		    return;
-		}
-	    }
-	    console.log('non system command, lookingup patients for this user');
-	    findUserByPhone(req.body.From, function (err, users) {
-		if (err) console.log('Error reading Users table:',err);
-		else 
-		    if (!users || users.length==0)
-			console.log('No users matching the incoming phone number '+req.body.From);
-		if (users.length>1) {
-		    console.log("Multiple users detected for incoming phone number");
-		    let msg="Pick which patient: ";
-		    for (let i=0; i<users.length; i++) {
-			msg+=users[i].subjectID+" ";
-		    }
-		    awaitChoice[req.body.From] = {
-			users: users,
-			msg: req.body.Body,
-			time: new Date().getTime()};
-		    sendSMS(req.body.From, msg);
-		}
-		else {
-		    let user=users[0];
-		    console.log('Will search for subject: '+user.subjectID);
-		    if (!handleMyLifeCommand(req, user, user.subjectID))  {
-			sendMessageToPatient(user.subjectID,
-					     user.contact.firstName,
-					     user.phone.split('-')[0],
-					     req.body.Body);
-		    }
-		}
-	    });
+    return done;
+}    
+
+
+function handleAddMemberFinish(req, res, dialog, firstName) {
+    console.log("handleAddMemberFinish: dialog:",dialog," firstName:",firstName);
+    dialog.time = new Date().getTime();
+    awaitChoice[req.body.From]=null;
+    let phone=req.body.From;
+    updateUser(phone, firstName, dialog.subjectID, (err, result) => {
+	console.log('Result of updateUser:',err);
+	if (err)
+	    sendSMS(req.body.From,"Failed to update our account; call support.");
+	else {
+	    let msg="Congratulations! You are now a care-circle member for "+dialog.subjectID+". "+
+		"At any time, write a message to this phone number and it will be voiced "+
+		"to your user/patient and they can respond later. It would be great if you can write "+
+		"to them a few times a week and sometimes ask simple questions. Save this "+
+		"phone number please. "+
+		"Please review our documentation http://www.wholehealthplustechnology.com/guide Together, we "+
+		"can help keep your patient connected to Life! ";
+	    sendSMS(req.body.From, msg);
+	    sendSMS('+19787643488',"New MyLife Member added "+dialog.subjectID+' Member:'+firstName+' phone:'+req.body.From);
 	}
+    });
+}
+
+function handleAddMemberStart(req, res, dialog, subjectID) {
+    subjectID=subjectID.toLowerCase(); // Force all subjectID's to be lower case
+    console.log("handleAddMember: dialog:",dialog," subjectID:",subjectID);
+    dialog.time = new Date().getTime();
+    // See if subject exists
+    findSubject(subjectID, (err, subject) => {
+	if (err || !subject) {
+	    sendSMS(req.body.From,"Sorry, we were not able to find that patient.");
+	    awaitChoice[req.body.From]=null;
+	    return;
+	}
+	sendSMS(req.body.From,"Excellent, now, offer us a first name to refer to you by. Go.");
+	dialog.subjectID = subjectID;
+	dialog.state='AddMemberFinish';
+    });
+}
+
+function isDialog(req, res) {
+    let dialog=awaitChoice[req.body.From]
+    if (!dialog)
+	return false;
+    
+    // First make sure not timed-out
+    console.log("We are in awaitChoice...checking if timed out; Now="+new Date().getTime()+' vs '+awaitChoice[req.body.From].time);
+    if (new Date().getTime() - awaitChoice[req.body.From].time >30*1000) {
+	console.log('awaitChoice timed out, removing')
+	awaitChoice[req.body.From]=null;
+	return false;
+    }
+
+    // The dialog.state can be either 'PickPatient' or 'ActivateMember'
+    // In both cases, the 'body' is the subject ID
+    let subjectID=req.body.Body.trim().toLowerCase();
+    console.log("Looking for patient:"+req.body.Body);
+    if (dialog.state == 'AddMember') {
+	handleAddMemberStart(req, res, dialog, subjectID);
+	return true;
+    }
+    if (dialog.state == 'AddMemberFinish') {
+	handleAddMemberFinish(req, res, dialog, req.body.Body.trim().toLowerCase());
+	return true;
+    }
+    
+    console.log('comparing to user array:',awaitChoice[req.body.From].users);
+    for (let i=0; i<awaitChoice[req.body.From].users.length; i++) {
+	console.log('comparing ['+dialog.users[i].subjectID.toLowerCase()+'] to ['+
+		    req.body.Body+']');
+	if (dialog.users[i].subjectID.toLowerCase() == subjectID) {
+	    let user=dialog.users[i];
+	    console.log('Found patient! '+dialog.users[i].subjectID);
+
+	    req.body.Body = dialog.msg; // Put back in the original message
+	    if (!handleMyLifeCommand(req, res, user, user.subjectID))  {
+		sendMessageToPatient(
+		    user.subjectID,
+		    user.contact.firstName,
+		    req.body.From,
+		    dialog.msg);
+		sendSMS(req.body.From,"Message sent to "+awaitChoice[req.body.From].users[i].subjectID);
+	    }
+	    awaitChoice[req.body.From]=null;
+	    return true;
+	}
+    }
+    console.log('Cound not find the patient!');
+    sendSMS(req.body.From,"Patient "+req.body.Body+" not found; Sorry.");
+    return true;
+}
+
+
+app.post('/sms', (req, res) => {
+    console.log("");
+    console.log('Hey, we got some message! From:',req.body.From+' msg:'+req.body.Body);
+
+    req.body.Body=req.body.Body.trim(); // Remove leading/trailing spaces
+    // First, let's see if the in-coming phone is stakutis or batulis AND is a command
+    if (isBatulisTest(req, res)) return;
+
+    // Next, see if the in-coming phone a Batulis SMS user; if so process, else process as MyLife
+    const user=activeUsers[req.body.From];
+    if (user) {
+	handleSMSSurvey(user, req.body.Body);
+	res.writeHead(200, {'Content-Type': 'text/xml'});
+	res.end();
+	return;
+    }
+
+    // Ok, it's for us, MyLife.  It could be a keyword-instruction message like 'cjs xxxx'
+    if (handleMyLifeSystemCommand(req, res))
+	return;
+
+    // Ok, it is possible that this incoming message is a 'response' to a dialog we've stared.
+    // Check that next.
+    if (isDialog(req, res))
+	return true;
+
+    // Ok, at this point we suspect the message is from a real 'member'. We dont know yet if there
+    // is an associated patient (or its a new member).  We have to look up the associated patient.
+
+    findUserByPhone(req.body.From, function (err, users) {
+	if (err) {
+	    console.log('Error reading Users table:',err);
+	    return;
+	}
+	else 
+	    if (!users || users.length==0) {
+		console.log('No users matching the incoming phone number '+req.body.From);
+		let msg="Welcome to My Life! We don't recognize your phone number. Maybe you are a "+
+		    "new member wanting to reach your My Life user/patient. If so, respond now with that "+
+		    "My Life user's account name/number. Go.";
+		awaitChoice[req.body.From] = {
+		    users: users,
+		    state: "AddMember",
+		    msg: req.body.Body,
+		    time: new Date().getTime()};
+		sendSMS(req.body.From, msg);
+		return;
+	    }
+
+	if (users.length>1) {
+	    console.log("Multiple users detected for incoming phone number");
+	    let msg="Pick which patient: ";
+	    for (let i=0; i<users.length; i++) {
+		msg+=users[i].subjectID+" ";
+	    }
+    console.log('Adding user array:',users);
+	    awaitChoice[req.body.From] = {
+		users: users,
+		state: "PickPatient",
+		msg: req.body.Body,
+		time: new Date().getTime()};
+    console.log('Added user array:',awaitChoice[req.body.From].users);
+	    sendSMS(req.body.From, msg);
+	}
+	else {
+	    let user=users[0];
+	    console.log('Will search for subject: '+user.subjectID);
+	    // Now see if it is a MyLife member instruction, like 'mylife xxx'
+	    if (handleMyLifeCommand(req, res, user, user.subjectID))
+		return;
+	    sendMessageToPatient(user.subjectID,
+				     user.contact.firstName,
+				     user.phone.split('-')[0],
+				     req.body.Body);
+	    sendSMS(req.body.From, 'Message sent to '+user.subjectID+'. Thank you for using My Life; keeping '+user.subjectID+' connected is important to us!');
+	}
+    });
 
     res.writeHead(200, {'Content-Type': 'text/xml'});
     res.end();
@@ -1195,8 +1310,6 @@ function convertSpokenDateStr(incoming) {
 	//console.log("---Str:"+new Date(UTC));
 	console.log('Incoming:['+incoming+'] result:['+UTC+']');
 	return UTC;
-v
-
     } catch (e) {
 	console.log('convertDateStr exception:',e);
 	return "Unknown exception "+e;
@@ -1227,18 +1340,6 @@ function convertSpokenDateStringInLocaleToUTC(str) {
 }
 
 /*
-Two word examples:
-  5th 1pm
-those are clear, first one is day1 and 2nd is h1.
-Four word examples:
-  Twenty first 12 thirty 
-d1,d2, h1, h2
-Three word examples:
-case a:  20th 1 30pm   d1 h1 h2
-case b:  20 fith 2pm   d1 d2 h1
-  If the last number is >12 then it must be case-a else case-b
-*/
-
 convertSpokenDateStr('june 15th 4pm');
 convertSpokenDateStr('June 15th 4pm');
 convertSpokenDateStr('June fifteen 4pm');
@@ -1252,8 +1353,8 @@ convertSpokenDateStr('April thirty 4am');
 convertSpokenDateStr('august 5th 1pm');
 convertSpokenDateStr('august 20th 1 30pm');
 convertSpokenDateStr('august 20 fifth 1pm');
+*/
 
-/*
 try {
     activeUsers = JSON.parse(fs.readFileSync('activeUsers.json','utf-8'));
 } catch (e) {console.log("could not read active SMS user file");}
@@ -1262,6 +1363,6 @@ console.log("Starting the web server...");
 http.createServer(app).listen(port, () => {
     console.log('Express server listening on port '+port);
 });
-*/
+
 
 
