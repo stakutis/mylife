@@ -688,11 +688,7 @@ function isDialog(req, res) {
 
 	    req.body.Body = dialog.msg; // Put back in the original message
 	    if (!handleMyLifeCommand(req, res, user, user.subjectID))  {
-		sendMessageToPatient(
-		    user.subjectID,
-		    user.contact.firstName,
-		    req.body.From,
-		    dialog.msg);
+		sendMessageToPatient(user, dialog.msg);
 		sendSMS(req.body.From,"Message sent to "+awaitChoice[req.body.From].users[i].subjectID);
 	    }
 	    awaitChoice[req.body.From]=null;
@@ -775,10 +771,7 @@ app.post('/sms', (req, res) => {
 	    // Now see if it is a MyLife member instruction, like 'mylife xxx'
 	    if (handleMyLifeCommand(req, res, user, user.subjectID))
 		return;
-	    sendMessageToPatient(user.subjectID,
-				     user.contact.firstName,
-				     user.phone.split('-')[0],
-				     req.body.Body);
+	    sendMessageToPatient(user,req.body.Body);
 	    sendSMS(req.body.From, 'Message sent to '+user.subjectID+'. Thank you for using My Life; keeping '+user.subjectID+' connected is important to us!');
 	}
     });
@@ -788,7 +781,19 @@ app.post('/sms', (req, res) => {
 });
 
 
-function sendMessageToPatient(subjectID, fromFirstName, fromPhone, msg) {
+function sendMessageToPatient(user, msg) {
+    console.log('sendMessageToPatient: user:',user);
+    sendMessageToPatientInternal(user.subjectID,
+			 user.contact.firstName || 'noname',
+			 user.phone.split('-')[0],
+			 msg);
+    user.lastSent=new Date().toISOString();
+    updateUserDB(user);
+}
+
+
+
+function sendMessageToPatientInternal(subjectID, fromFirstName, fromPhone, msg) {
     findSubjectAttributeOnly(subjectID,"interactions.messages",(err,subject)=>{
 	if (err) {
 	    console.log("ERROR finding subject!");
@@ -837,6 +842,22 @@ function updateUser(phone, firstName, subjectID, nextFunc) {
         }
         nextFunc(err, data.Item);
     });  
+}
+
+function updateUserDB(user, nextFunction) {
+    let docClient = new AWS.DynamoDB.DocumentClient(region);
+    console.log('updateUsertDB: ',user);    
+    let params = {
+	TableName : "MyLife_Users",
+	Item : user
+    };
+    docClient.put(params, (err,data) => {
+	console.log("Result of updating user table:",err);
+	if (err) {
+	    console.log("!!!! Error updating user table:",err);
+	}
+	if (nextFunction) nextFunction(err, data);
+    });
 }
 
 

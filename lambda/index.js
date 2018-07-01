@@ -8,6 +8,8 @@ const _ = require('underscore');
 //Make sure to enclose your value in quotes, like this: const APP_ID = 'amzn1.ask.skill.bb4045e6-b3e8-4133-b650-72923c5980f1';
 const APP_ID = undefined;
 
+//const SLOT_NAME='RandomWordSlotNew';
+const SLOT_NAME='RandomWordSlot';
 
 const HELP_MESSAGE = "Most users can simply say Alexa, Start My Life, to get going. "+
       "That will then give you more specifics and help on how to proceed. ";
@@ -21,32 +23,15 @@ let MyLife_Subjects = [
     "email": "vin@heaven.com",
     "firstName": "Lucy",
     "lastName": "Smith",
-    "zipcode": "01742"
+      "zipcode": "01742",
+      "dateCreated": {
+	  "gmt": new Date().getTime()-5*1000*24*60*60
+      }
   },
   "core": {
     "DoB": "Full ISO time",
     "gender": "M",
     "healthConditions": [],
-    "interests": {
-      "hobbies": [
-        "golf",
-        "crossword",
-        "puzzles"
-      ],
-      "religion": [
-        "christian",
-        "catholic"
-      ],
-      "sports": {
-        "baseball": [
-          "redsox",
-          "yankees"
-        ],
-        "hockey": [
-          "bruins"
-        ]
-      }
-    },
       "medications": ["atenolol","oxybutynin","metformin"]
   },
   "deviceID": "null",
@@ -98,6 +83,10 @@ let MyLife_Subjects = [
       "frequency": "always",
       "whichOne": "random1"
     },
+      "lastLogin": {
+	  "timesLoggedIn":12,
+	  "gmt": new Date().getTime() - 1*1000*26*60*60,
+      },
     "surveys": [
       "pain" // WARNING: This is hardcoded below; check for isDemo
     ]
@@ -357,7 +346,7 @@ const RandomGetGreatingMessages=[
     "I'm having a good day so far, I hope you are too " ,
     "Hey, let's get familiar with each other, ",
     "I was thinking about going to the beach tomorrow but sadly I'm trapped inside this canister, ",
-    "I'm glad summer is nearly here ",
+    "I'm glad summer is finally here ",
     "Ducks make good pets. They are smarter than fish you know, ",
     "Sometime you might consider attaching me to your stereo. It makes my voice sound better. I like my voice, ",
     "Feel free to hug me sometimes; computers are people too you know, ",
@@ -400,12 +389,12 @@ function isFalse(word) {
   return false;
 }
 
-function expect2Str(expect) {
+function expect2Str(expect,multiple) {
     // remove bars
     let words = expect.split(',');
     for (let i=0; i<words.length; i++) words[i]=words[i].split('|')[0];
     if (words.length > 1) 
-	words[words.length-1]="or "+words[words.length-1];
+	words[words.length-1]= (multiple ? "and " : "or ")+words[words.length-1];
     return words.join(", ");
 }
 
@@ -512,6 +501,24 @@ function dayStr2Num(d1) {
     case 'twenty':
     case 'twentyth':
 	d1=20; break;
+    case '21st':
+	d1=21; break;
+    case '22nd':
+	d1=22; break;
+    case '23rd':
+	d1=23; break;
+    case '24th':
+	d1=24; break;
+    case '25th':
+	d1=25; break;
+    case '26th':
+	d1=26; break;
+    case '27th':
+	d1=27; break;
+    case '28th':
+	d1=28; break;
+    case '29th':
+	d1=29; break;
     case '30':
     case '30th':
     case 'thirty':
@@ -591,6 +598,8 @@ function convertSpokenDateStringToUTC(incoming) {
   case a:  20th 1 30pm   d1 h1 h2
   case b:  20 fith 2pm   d1 d2 h1
   If the last number is >12 then it must be case-a else case-b
+
+ july : twenty fifth 2am
 */
 	if (parts.length==2) {
 	    d1=dayStr2Num(parts[0]);
@@ -683,7 +692,7 @@ function handleReminders(self, user, word) {
    
   if (self.attributes.state == 'Start') {
       console.log('REMINDERS start');
-      // Pick a random reminder and then add it to the prefix attribute
+     // Pick a random reminder and then add it to the prefix attribute
       msg = "You have the following reminder: ";
       msg += getRandom(user.interactions.reminders.selections)+'. <break time="250ms"/> ' ;
       self.attributes.prefix += msg;
@@ -727,7 +736,7 @@ function handleSurveys(self, subject, word) {
 		  ' Your friend '+self.attributes.surveyRequestedBy+
 		  ' is asking you the following questions:<break time="1s"/> ';
 	    if (survey.announce)
-		self.attributes.prefix+=survey.announce;
+		self.attributes.prefix+=substituteInsertions(self, subject, survey.announce);
 	    if (survey.defaultExpect)
 		self.attributes.prefix+=" For each question you can say <break time='300ms'/>"+
 		expect2Str(survey.defaultExpect)+". <break time='300ms'/>";
@@ -758,16 +767,30 @@ function handleSurveys(self, subject, word) {
 	    }
 	}  
 	self.attributes.state = 'SurveyAnswer';
-	msg = question.question;
+	msg = question.announce || "";
+	msg += " ";
+	msg += question.question || "";
 	if (question.expect && !question.gaveInitialPrompt) {
 	    question.gaveInitialPrompt = true;
-	    msg +=" You can say "+expect2Str(expect);
+	    if (expect!="{free}")
+		msg +=" You can say "+expect2Str(expect,question.multiple);
+	    if (question.multiple) msg += ' <break time="250ms"/>. Pick several please, <break time="250ms"/> Go. ';
 	}
 	console.log('     handleSurvey: Asking: '+msg);
-	self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+msg, msg);
-	return;
+	if (question.final) {
+	    console.log("This question is a FINAL one");
+	    self.attributes.prefix += msg;
+	    // Let fall out
+	}
+	else {
+	    self.emit(':elicitSlot',SLOT_NAME,getPrefix(self)+msg, msg);
+	    return;
+	}
     }
     
+    let list=[];
+    let selectedIdx=0;
+
     if (self.attributes.state == 'SurveyAnswer') {
 	let skipAck=false;
 	// See if the expected responses are yes/no type and then allow flexibility
@@ -778,49 +801,180 @@ function handleSurveys(self, subject, word) {
 	    if (isFalse(word)) word='no';
 	}
 	
+	let answer="";
 	// Now, see if the 'word' is in the expected list
-	let i;
-	let list=expect.split(',');
-	for (i=0; i < list.length; i++) {
-	    list[i]=list[i].trim();
-	    if (list[i].indexOf(word) != -1) break;
+	if (question.final) {
+	    console.log('This question is a FINAL one');
 	}
-	if (i >= list.length) {
-	    self.attributes.timesTried++;
-	    if (self.attributes.timesTried >= 3) {
-		console.log("Bailing out; user tried too many times");
-		self.attributes.prefix += "I still didn't quite understand so we'll skip this one for now.";
-		word="N/A";
-		list[i]=word;  // because it is picked-up below...
-		skipAck = true;
+	else
+	if (question.multiple) {
+	    console.log("Handling multiple...");
+	    word = word.replace("oh ","");  // remove 'oh'
+	    word = word.replace(new RegExp(" and ",'g')," ");  // remove 'and'
+	    let words=word.split(" ");
+	    let goodWords=self.attributes.goodWords || [];
+	    let badWords=[];
+	    for (let wordIdx=0; wordIdx < words.length; wordIdx++) {
+		word = words[wordIdx];
+		if (word=="done") break;
+		if (word=="none") break;
+		if (word=="stop") break;
+		let i;
+		list=expect.split(',');
+		for (i=0; i < list.length; i++) {
+		    list[i]=list[i].trim();
+		    if (list[i] == word) break;
+		}
+		if (i >= list.length) {
+		    // avoid duplicating a word
+		    if (badWords.indexOf(word)==-1) badWords.push(word);
+		}
+		else goodWords.push(word);
 	    }
-	    else {
-		self.attributes.prefix += "I'm sorry, your response didn't match what I was expecting,"+
-		    " I was expecting one of, "+expect2Str(expect)+"., ";
-		self.attributes.state = 'SurveyQuestion';  // Completely re-ask the question
-		console.log("    asking:"+self.attributes.prefix);
-		self.emit("InteractionIntent");
+	    if (badWords.length) {
+		console.log('badWords:',badWords);
+		if (goodWords.length) {
+		    self.attributes.prefix += "Ok, I correctly heard "+goodWords.join(" and ");
+		    self.attributes.prefix += '. <break time="250ms"/> ';
+		    self.attributes.prefix += "But ";
+		}
+		if (badWords[0]=="and") {
+		    self.attributes.prefix += 'I think you used the word <break time="200ms"/> AND <break time="200ms"/> and sadly I just cant handle that...dont ask why...it drives me nuts too. '+
+			' <break time="200ms"/> So can you please say those other words again now or say done';
+		}
+		else {
+		    msg="I didn't understand  "+badWords.join(" and ");
+		    msg += '. <break time="250ms"/> ';
+		    msg += '. Please try '+(badWords.length==1 ? 'that word':'those words');
+		    msg += ' again.  Go. ';
+		}
+		self.attributes.goodWords = goodWords;
+		self.emit(':elicitSlot',SLOT_NAME,getPrefix(self)+msg, " You can say "+expect2Str(expect,question.multiple));
 		return;
 	    }
+	    if (goodWords.length == 0) {
+		    console.log("Bailing out; user gave no good words");
+		    self.attributes.prefix += "Ok we'll skip this one for now.";
+		    word="N/A";
+		    list[i]=word;  // because it is picked-up below...
+		    skipAck = true;
+	    }
+	    else {
+		console.log('Got an expected answer(s)');
+		answer=goodWords.join('|');
+		self.attributes.goodWords = [];
+		self.attributes.surveyAnswers.answers.push(answer);
+	    }
+	}
+	else {
+	    let i;
+	    let list=expect.split(',');
+	    for (i=0; i < list.length; i++) {
+		list[i]=list[i].trim();
+		if (list[i]=="{free}"){
+		    list[i]=word; // because it is used below
+		    break;
+		}
+		if (list[i].indexOf(word) != -1) break;
+	    }
+	    if (i >= list.length) {
+		self.attributes.timesTried++;
+		if (self.attributes.timesTried >= 3) {
+		    console.log("Bailing out; user tried too many times");
+		    self.attributes.prefix += "I still didn't quite understand so we'll skip this one for now.";
+		    word="N/A";
+		    list[i]=word;  // because it is picked-up below...
+		    skipAck = true;
+		}
+		else {
+		    self.attributes.prefix += "I'm sorry, your response didn't match what I was expecting,"+
+			" I was expecting one of, "+expect2Str(expect,question.multiple)+"., ";
+		    self.attributes.state = 'SurveyQuestion';  // Completely re-ask the question
+		    console.log("    asking:"+self.attributes.prefix);
+		    self.emit("InteractionIntent");
+		    return;
+		}
+	    }
+	    console.log('Got an expected answer');
+	    selectedIdx = i;
+	    answer=list[i];
+	    self.attributes.surveyAnswers.answers.push(answer);
 	}
 	
-	console.log('Got an expected answer');
-	self.attributes.surveyAnswers.answers.push(list[i]);
+	self.attributes.timesTried = 0;
 	
 	// Let's now setup an Acknowledgement for the user
-	let ack = survey.defaultAck;
-	if (!ack) ack = question.responseAck;
-	if (ack && !skipAck)
-	    try { self.attributes.prefix += ack.split(',')[i]+', '; 
-		  console.log('Providing ack:'+self.attributes.prefix);
+	let ack = survey.defaultAck || "";
+	if (question.responseAck) ack=question.responseAck;
+	ack+=" ";
+	if (ack && !skipAck) {
+	    if (question.multiple) self.attributes.prefix += ack;
+	    else
+		try {
+		    if (!ack.split(',')[selectedIdx])
+			self.attributes.prefix += ack+", ";// just the whole thing because might only have 1
+		    else
+			self.attributes.prefix += ack.split(',')[selectedIdx]+', '; 
+		    console.log('Providing ack:'+self.attributes.prefix);
 		} catch (e) {
+		    self.attributes.prefix += ack+", ";  // just the whole thing because might only have 1
 		    console.log('Dang it, couldnt get the ack, e:',e);
 		}
+	    self.attributes.prefix = substituteInsertions(self, subject, self.attributes.prefix);
+	}
 
-	self.attributes.surveyQuestionIdx++;
+	
+
+	// See if we need to update core
+	if (question.update) {
+	    self.attributes.updatedCore = true;
+	    // Run the the update object string and build up the pieces as needed
+	    let obj=subject;
+	    list=question.update.split(".");
+	    for (let j=0; j<list.length; j++) {
+		console.log('updating core '+question.update+'  j:',j,' list[j]:',list[j],' obj[]:',obj[list[j]]);
+		obj[list[j]]=obj[list[j]] || {};
+		let val=answer;
+		if (question.withDate) val=new Date().getTime();
+		if (j==list.length-1) {
+		    console.log("Setting "+list[j]+" to "+val);
+		    obj[list[j]]=val;
+		}
+		obj=obj[list[j]];
+	    }
+	    console.log("updated core to:",subject.core);
+	}
+
+	// Determine the next question
+	if (question.next) {
+	    let toMatch;
+	    if (typeof question.next == 'string') toMatch = question.next;
+	    else {
+		// might be only one item
+		toMatch = question.next[selectedIdx];
+		if (!toMatch) toMatch = question.next[0];
+	    }
+
+	    console.log("Looking for next question, id:",toMatch);
+	    let q=_.findIndex(survey.questions, (item) => {
+		return (item.id == toMatch);
+	    });
+	    if (q==-1) {
+		self.attributes.prefix +='TROUBLE! Could not find question with id '+toMatch+'. ';
+		console.log('TROUBLE! Could not find question with id '+toMatch+'. ');
+		self.attributes.surveyQuestionIdx++;
+	    }
+	    else {
+		self.attributes.surveyQuestionIdx = q;
+		console.log("Setting question idx to ",q," which is:",survey.questions[q]);
+	    }
+	}
+	else
+	    self.attributes.surveyQuestionIdx++;
+
 	/*** See if we finished THIS survey ***/
  	if (self.attributes.surveyQuestionIdx >= 
-	    survey.questions.length) {
+	    survey.questions.length || question.final) {
 	    console.log("Finished this questionairre");
 	    self.attributes.prefix += " <break time='500ms'/> ";
 	    if (self.attributes.surveyRequestedBy) 
@@ -834,7 +988,22 @@ function handleSurveys(self, subject, word) {
 	    if (!subject.interactions.completedSurveys)
 		subject.interactions.completedSurveys = [ ];
 	    subject.interactions.completedSurveys.push(self.attributes.surveyAnswers);
-	    self.attributes.state = "SurveyUpdateDatabase";
+
+	    if (question.instructions) {
+		let sendTo=translateSendTo(self, subject, question.instructions.sendTo);
+		let msg=substituteInsertions(self, subject, question.instructions.msg);
+		console.log("Sending msg:"+msg+" to:"+sendTo);
+		sendSMS(self, sendTo, msg, (err) => {
+		    if (self.attributes.updatedCore)
+			self.attributes.state = "SurveyUpdateCore";
+		    else self.attributes.state = "SurveyUpdateDatabase";
+		    self.emit('InteractionIntent');
+		});
+	    }    
+	    
+	    if (self.attributes.updatedCore)
+		self.attributes.state = "SurveyUpdateCore";
+	    else self.attributes.state = "SurveyUpdateDatabase";
 	    self.emit('InteractionIntent');
 	    return;
 	}
@@ -847,6 +1016,21 @@ function handleSurveys(self, subject, word) {
 	return;
     }
     
+    if (self.attributes.state == "SurveyUpdateCore") {
+	console.log("Updating core: shopping:",subject.core.shopping);
+	updateSubjectAttributeOnly(self, 
+				   subject.ID,
+				   subject.core,
+				   "core", (self, err, data) => {
+				       if (err) self.attributes.prefix += "ERROR saving to database! ";
+
+				       self.attributes.state = "SurveyUpdateDatabase";
+				       self.emit('InteractionIntent');
+				   }
+				  );
+	return;
+    }
+
     if (self.attributes.state == "SurveyUpdateDatabase") {
 	updateSubjectAttributeOnly(self, 
 				   subject.ID,
@@ -910,7 +1094,7 @@ function handleSurveys(self, subject, word) {
 	console.log("Removing surveys from subject");
 	subject.interactions.surveys=
 	    _.filter(subject.interactions.surveys,(survey) =>
-		     survey == 'adl');   // remove all non-adl surveys
+		     survey == 'adl' );   // remove all non-adl surveys
 	updateSubjectAttributeOnly(self, 
 				   subject.ID,
 				   subject.interactions.surveys,
@@ -958,6 +1142,7 @@ function getMedication(self, medication, nextFunc) {
 
 function getSurvey(self, survey, nextFunc) {
     console.log("getSurvey: "+survey);
+/*
     if (self.attributes.isDemo)
 	return nextFunc(self, null,
 {
@@ -968,10 +1153,11 @@ function getSurvey(self, survey, nextFunc) {
     {
       "expect": "same,better,worse",
       "question": "Tell me how you are feeling right now compared to yesterday. ",
-      "responseAck": "Ok.,That's great.,Oh, sorry you feel that way."
+      "responseAck": "Ok.,That's great.,Oh sorry you feel that way."
     }
   ]
 }		       );
+*/
     var docClient = new AWS.DynamoDB.DocumentClient();
     const params = {
         TableName: 'MyLife_Surveys',
@@ -1003,6 +1189,7 @@ function handleMeds(self, subject, word) {
 	    console.log("Found medication:",medication);
 	    if (!medication) {
 		self.attributes.prefix += "Unable to find your medication "+subject.core.medications[idx]+" in our database! ";
+		self.emit('InteractionIntent');
 		return;
 	    }
 	    self.attributes.medication=medication;
@@ -1034,7 +1221,7 @@ function handleMeds(self, subject, word) {
 		medication.sideEffects+'?';
 	    self.attributes.state = 'MedsResponse';
 	    console.log("     Saying:"+msg);
-	    self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+msg,"Please say yes or no.");
+	    self.emit(':elicitSlot',SLOT_NAME,getPrefix(self)+msg,"Please say yes or no.");
 	});
 	return;
     }
@@ -1056,13 +1243,13 @@ function handleMeds(self, subject, word) {
 				     msg += "Oh goodness, I'm sorry to hear that. Would you like me to tell someone in your care circle?";
 				     self.attributes.state = "MedsCareCircleResponse";
 				     console.log("     Saying:"+self.attributes.prefix);
-				     self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+msg,'Please say yes or no.');
+				     self.emit(':elicitSlot',SLOT_NAME,getPrefix(self)+msg,'Please say yes or no.');
 				 });
       return;
     }
       if (!isFalse(word.value)) {
 	  console.log("did give us a good yes/now word");
-	  self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+" Please say yes or no","Please say yes or no");
+	  self.emit(':elicitSlot',SLOT_NAME,getPrefix(self)+" Please say yes or no","Please say yes or no");
 	  return;
       }
     console.log('handleMeds: Subject said NO to side effect');
@@ -1084,7 +1271,38 @@ function handleMeds(self, subject, word) {
   return;
 }
 
+    function findDelivererUser(self, subject) {
+	console.log("findDelivererUser");
+	if (!self.attributes.users) return null;
+	let i;
+	for (i=0; i<self.attributes.users.length; i++)
+	    if (self.attributes.users[i].attributes.indexOf("deliverer")!=-1) break;
+	if (i==self.attributes.users.length) i=0;  // Pick this poor bastard if noone else
+	console.log("findDelivererUser:",self.attributes.users[i]);
+	return self.attributes.users[i];
+    }
 
+    function translateSendTo(self, subject, sendTo) {
+	let user=findDelivererUser(self, subject);
+	if (!user) return user;
+	return user.phone;
+    }
+
+    function substituteInsertions(self, subject, str) {
+	str=str.replace("{firstname}",subject.contact.firstName);
+	if (subject.core.shopping) {
+	    str=str.replace("{core.shopping.items}", subject.core.shopping.items);
+	    str=str.replace("{core.shopping.place}", subject.core.shopping.place);
+	}
+	let user=findDelivererUser(self, subject);
+	if (user) {
+	    console.log("substituteInsertions: user is:",user);
+	    str=str.replace("{carecircle.deliverer.firstname}",user.contact.firstName);
+	    str=str.replace("{carecircle.deliverer.phone}",user.contact.phone);
+	}
+	return str;
+    }
+    
 function handleSendMessage(self, subject, word) {
     console.log('handleSendMessage: state:'+self.attributes.state);
 
@@ -1111,7 +1329,7 @@ function handleSendMessage(self, subject, word) {
 	    }
             self.attributes.state = 'SendMessageGetUser';
 	    console.log("     Saying:"+self.attributes.prefix+msg);
-            self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+msg,msg);
+            self.emit(':elicitSlot',SLOT_NAME,getPrefix(self)+msg,msg);
 	});
 	return;
     }
@@ -1179,7 +1397,7 @@ function handleSendMessage(self, subject, word) {
 	    self.attributes.sendTo=users[idx].phone.split('-')[0];
 	    self.attributes.state="SendMessageGetMessage";
 	    console.log("     Asking for SMS message");
-	    self.emit(':elicitSlot','RandomWordSlot',
+	    self.emit(':elicitSlot',SLOT_NAME,
 		      getPrefix(self)+' Tell me the message for '+users[idx].contact.firstName+'; keep it short please.',
 		      'Please offer a short message to send to '+word.value);
 	    return;
@@ -1204,8 +1422,8 @@ function isAQuestion(msg) {
 }
 
 function sendSMS(self, number, message, nextFunc) {
-    number = number.split('-')[0];
     console.log('sendSMS to '+number+' message:'+message);
+    number = number.split('-')[0];
     request.post("https://api.twilio.com/2010-04-01/Accounts/AC6203fa66f81b40708bbc4810c28fe049/Messages",
 		 { 
 		     body: "&From=+16179968873&To="+number+"&Body="+message,
@@ -1323,7 +1541,7 @@ function handleProfile(self, subject, word) {
 	       'work correctly. <break time="300ms"/> What is your zipcode?';
 	   console.log("Soliciting for zipcode");
 	   self.attributes.state = "ProfileGetZipcode";
-	   self.emit(':elicitSlot','RandomWordSlot',
+	   self.emit(':elicitSlot',SLOT_NAME,
 		     getPrefix(self)+msg,"Please tell me your zipcode.");
 	   return;
        }
@@ -1338,7 +1556,7 @@ function handleProfile(self, subject, word) {
 	request(url,(err, data) => {
 	    console.log('Zipcode lookup result:',err);
 	    if (err) {
-		self.emit(':elicitSlot','RandomWordSlot',
+		self.emit(':elicitSlot',SLOT_NAME,
 			  getPrefix(self)+"Sorry, I couldn't find that zip code "+word+", Please say it again?","Please tell me your zipcode.");
 		return;
 	    }
@@ -1346,7 +1564,7 @@ function handleProfile(self, subject, word) {
 	    if (typeof data == 'string') data=JSON.parse(data);
 	    if (data.error_code) {
 		console.log('Error zipcode data is:',data);
-		self.emit(':elicitSlot','RandomWordSlot',
+		self.emit(':elicitSlot',SLOT_NAME,
 			  getPrefix(self)+"Sorry, I couldn't find that zip code "+word+", Please say it again?","Please tell me your zipcode.");
 		return;
 	    }
@@ -1381,7 +1599,7 @@ function handleEvent(self, subject, word) {
 	self.attributes.state = 'EventResponse';
 	self.attributes.skipEvent = true;
 	console.log('Asking if they want to set a new event...');
-	self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+
+	self.emit(':elicitSlot',SLOT_NAME,getPrefix(self)+
 		  ' Would you like to set a new calendar event?',"Please say yes or no.");
 	return;
     }
@@ -1394,7 +1612,7 @@ function handleEvent(self, subject, word) {
 	}
 	self.attributes.state = 'EventGetDate';
 	console.log('Asking for a date...');
-	self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+
+	self.emit(':elicitSlot',SLOT_NAME,getPrefix(self)+
 		  ' Please say the date and time. '+
 		  ' You can say something like this <break time="250ms"/> '+
 		  ' July 28th 3:30pm <break time="300ms"/> ',
@@ -1446,7 +1664,7 @@ function handleEvent(self, subject, word) {
 	let dd=new Date(); dd.setTime(d);
 	self.attributes.eventDate = dd;
 	self.attributes.state = 'EventGetMessage';
-	self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+
+	self.emit(':elicitSlot',SLOT_NAME,getPrefix(self)+
 		  ' Please say a short message to describe the event or say stop. ',
 		  ' Please say a short message to describe the event. ');
 	return;
@@ -1502,7 +1720,7 @@ function handleMessages(self, subject, word) {
       self.attributes.msgnum = -1;
       self.attributes.skipMessages = false;
        console.log('Asking if they want to hear their messages...');
-      self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+from,"Please say yes or no.");
+      self.emit(':elicitSlot',SLOT_NAME,getPrefix(self)+from,"Please say yes or no.");
       return;
   }
 
@@ -1547,7 +1765,7 @@ function handleMessages(self, subject, word) {
 	       subject.interactions.messages[self.attributes.msgnum].userPhone) {
 		console.log('The message turns out to be a question, so solicit an answer');
 		self.attributes.state = 'MessagesGetReply';
-		self.emit(':elicitSlot','RandomWordSlot',
+		self.emit(':elicitSlot',SLOT_NAME,
 			  getPrefix(self)+msg,
 			  "Please answer the question with a very short phrase or word.");
 		return;
@@ -1573,7 +1791,7 @@ function handleMessages(self, subject, word) {
 	console.log('MESSAGES Stating the next message to subject.');
 	self.attributes.state = "MessagesResponse";
 	console.log('Sending msg:'+msg);
-	self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+msg,"Please say yes or no.");
+	self.emit(':elicitSlot',SLOT_NAME,getPrefix(self)+msg,"Please say yes or no.");
 	return;
     }
   console.log('MESSAGES unknown situation!');
@@ -1703,7 +1921,7 @@ function handleWeather(self, subject, word) {
     if (self.attributes.state == 'Start') {
 	self.attributes.skipWeather = true;
 	self.attributes.state = 'WeatherStart';
-	self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+"Would you like to hear the weather forecast?","Please say yes or no.");
+	self.emit(':elicitSlot',SLOT_NAME,getPrefix(self)+"Would you like to hear the weather forecast?","Please say yes or no.");
 	return;
     }
 
@@ -1752,11 +1970,45 @@ function handleAnnounce(self, subject, word) {
 	sendSMS(self, '+19787643488', 'mylife: '+subject.ID+' signed in', () => {
 	    console.log('Updating the patients login-time...');
 	    let d=new Date();
+	    let timesLoggedIn=0,lastLogin=0;
+	    if (subject.interactions.lastLogin && subject.interactions.lastLogin.timesLoggedIn) {
+		timesLoggedIn = subject.interactions.lastLogin.timesLoggedIn;
+		lastLogin = subject.interactions.lastLogin.gmt;
+	    }
+	    timesLoggedIn++;
 	    subject.interactions.lastLogin={
+		timesLoggedIn : timesLoggedIn,
 		str: d.toISOString(),
 		gmt: d.getTime(),
 		bostonTime: new Date(d.getTime()-4*60*60*1000).toLocaleString()
 	    };
+	    let days = Math.round((d.getTime() - lastLogin)/(24*60*60*1000));
+	    if (lastLogin  && days > 2 )
+		self.attributes.prefix += " It has been "+days+" days since I last heard from you. "+
+		'I was getting a bit worried.<break time="300ms"/> ';
+
+	    console.log('lastLogin info; lastLogin:',lastLogin,' days:',days,' now:',d.getTime());
+	    if (!subject.contact.dateCreated.gmt)
+		subject.contact.dateCreated.gmt=new Date().getTime()-10*1000*24*60*60; // Pretend
+	    days = Math.round((d.getTime() - subject.contact.dateCreated.gmt)/(24*60*60*1000));
+	    console.log("Days since created:"+days);
+	    if (!subject.core.interests && days > 1)
+		if (subject.interactions.surveys.indexOf("interests")==-1) 
+		    subject.interactions.surveys.push("interests");
+
+	    console.log("Checking shopping:"+subject.core.shopping+" loginDays:"+days);
+	    if (!subject.core.shopping && days > 2)
+		if (subject.interactions.surveys.indexOf("shopping")==-1) 
+		    subject.interactions.surveys.push("shopping");
+		    
+	    if (subject.core.shopping)
+		console.log("Days sincde last shopping:",Math.round((d.getTime() - subject.core.shopping.lastDate)/(24*60*60*1000)));
+	    
+	    if (subject.core.shopping && 
+		Math.round((d.getTime() - subject.core.shopping.lastDate)/(24*60*60*1000))>2)
+		if (subject.interactions.surveys.indexOf("shopping")==-1) 
+		    subject.interactions.surveys.push("shopping");
+		
 	    updateSubjectAttributeOnly(self, subject.ID, subject.interactions.lastLogin,
 				       "interactions.lastLogin",(self,err,data) => {
 					   console.log('Result of updating login:',err);
@@ -1784,7 +2036,7 @@ function handleNews(self, subject, word) {
 	console.log('Setting pref to:'+pref);
 	self.attributes.state = 'NewsSelected';
 	// WARNING: Alexa wont hear the world "health" instead hears "help" and that forces a the help intent
-	self.emit(':elicitSlot','RandomWordSlot',getPrefix(self)+pref+
+	self.emit(':elicitSlot',SLOT_NAME,getPrefix(self)+pref+
 		  "You can say, No, or U.S., or world, or medicine, or money, or tech.","Please say No, or U.S., or world, or medicine, or money, or tech.");
 	return;
     }
@@ -1884,7 +2136,7 @@ const handlers = {
     },
     'ActivateIntent': function () {
 	dumpStuff('ActivateIntent', this);
-	let word=getRealSlotValue(this,'RandomWordSlot');
+	let word=getRealSlotValue(this,SLOT_NAME);
 	let words=word.value.split(' ');
 	let result="";
 	for (let i=0; i<words.length; i++) 
@@ -1905,7 +2157,7 @@ const handlers = {
     'InteractionIntent': function () {
       let word, subject;
       dumpStuff('InteractionIntent',this);
-      word=getRealSlotValue(this,'RandomWordSlot');
+	word=getRealSlotValue(this,SLOT_NAME);
       subject=this.attributes.subject;
       if (!subject) {
         this.emit(':tell',"Oh dear, something went wrong and I can't find your device in our database.");
@@ -1920,9 +2172,22 @@ const handlers = {
           word.value = "yes";
       }
 
-      // The 'Start' state means we're either just-starting a session OR we've completed 
+	if (word.value.trim().toLowerCase()=='stop') {
+	    console.log('USER SAID STOP');
+	    this.emit('AMAZON.StopIntent');
+	    return;
+	}
+
+	// The 'Start' state means we're either just-starting a session OR we've completed 
       // some tasks and look for more things to do.  Find the next thing to do or say goodbye.
       if (this.attributes.state == 'Start') {
+	  if (false) {
+              if (!this.attributes.skipSendMessage)
+		  return handleSendMessage(this, subject, word);
+              if (subject.interactions.surveys && subject.interactions.surveys.length && !this.attributes.skipSurveys)
+		  return handleSurveys(this, subject, word);
+	  }
+	  
 	  if (!this.attributes.skipAnnounce)
 	      return handleAnnounce(this, subject, word);
 
