@@ -1962,6 +1962,15 @@ function handleWeather(self, subject, word) {
     }
 }
 
+function daysSince(olderDate, newerDate) {
+    if (!newerDate) newerDate = new Date().getTime();
+    if (!olderDate) olderDate = new Date().getTime()-10*1000*24*60*60 // Pretend 10 days ago
+    let days;
+    days= (newerDate - olderDate) / (24*60*60*1000);
+    days=Math.round(days);
+    return days;
+}
+
 function handleAnnounce(self, subject, word) {
     console.log("******** Handle Announce ******");
     self.attributes.skipAnnounce=true;
@@ -1969,6 +1978,7 @@ function handleAnnounce(self, subject, word) {
     {
 	sendSMS(self, '+19787643488', 'mylife: '+subject.ID+' signed in', () => {
 	    console.log('Updating the patients login-time...');
+	    /** Update last login time first ***/
 	    let d=new Date();
 	    let timesLoggedIn=0,lastLogin=0;
 	    if (subject.interactions.lastLogin && subject.interactions.lastLogin.timesLoggedIn) {
@@ -1982,33 +1992,41 @@ function handleAnnounce(self, subject, word) {
 		gmt: d.getTime(),
 		bostonTime: new Date(d.getTime()-4*60*60*1000).toLocaleString()
 	    };
-	    let days = Math.round((d.getTime() - lastLogin)/(24*60*60*1000));
+
+	    /** Now let's see if we can ding the user if we haven't heard from them in a while **/
+	    let days = daysSince(lastLogin);
+	    console.log('lastLogin info; lastLogin:',lastLogin,' days:',days,' now:',d.getTime(),' timesLoggedIn:',timesLoggedIn);
 	    if (lastLogin  && days > 2 )
 		self.attributes.prefix += " It has been "+days+" days since I last heard from you. "+
 		'I was getting a bit worried.<break time="300ms"/> ';
 
-	    console.log('lastLogin info; lastLogin:',lastLogin,' days:',days,' now:',d.getTime());
-	    if (!subject.contact.dateCreated.gmt)
-		subject.contact.dateCreated.gmt=new Date().getTime()-10*1000*24*60*60; // Pretend
-	    days = Math.round((d.getTime() - subject.contact.dateCreated.gmt)/(24*60*60*1000));
-	    console.log("Days since created:"+days);
-	    if (!subject.core.interests && days > 1)
-		if (subject.interactions.surveys.indexOf("interests")==-1) 
-		    subject.interactions.surveys.push("interests");
+	    /** Let's ensure we have a 'dateCreated' block in the users record **/
+	    if (!subject.contact.dateCreated) {
+		subject.contact.dateCreated = {
+		    gmt:new Date().getTime()-10*1000*24*60*60 // Pretend 10 days ago
+		};
+	    }
 
-	    console.log("Checking shopping:"+subject.core.shopping+" loginDays:"+days);
-	    if (!subject.core.shopping && days > 2)
-		if (subject.interactions.surveys.indexOf("shopping")==-1) 
-		    subject.interactions.surveys.push("shopping");
-		    
-	    if (subject.core.shopping)
-		console.log("Days sincde last shopping:",Math.round((d.getTime() - subject.core.shopping.lastDate)/(24*60*60*1000)));
-	    
-	    if (subject.core.shopping && 
-		Math.round((d.getTime() - subject.core.shopping.lastDate)/(24*60*60*1000))>2)
-		if (subject.interactions.surveys.indexOf("shopping")==-1) 
-		    subject.interactions.surveys.push("shopping");
+	    /** Now, lets run through profile type things we should ask this time, but 
+		only ask for 1 thing to not bug them too much **/
+	    let interests=["religion","books","shows","health","food"];
+	    for (let i=0; i<interests.length; i++) {
+		if (timesLoggedIn < 1) break;  // Let's not ask them profile stuff just yet
+		console.log("Checking interest:"+interests[i]);
+		if (!subject.core.interests || !subject.core.interests[interests[i]]) {
+		    if (subject.interactions.surveys.indexOf("interests_"+interests[i])==-1)   
+			subject.interactions.surveys.push("interests_"+interests[i]);
+		    break;  // Push only 1 survey each time
+		}
+	    }
 		
+	    /* Ask them 'shopping' if a fairly new account but older than 2 days */
+	    if (timesLoggedIn > 2 ) {
+		console.log("Checking shopping:"+subject.core.shopping);
+		if (!subject.core.shopping || daysSince(subject.core.shopping.lastDate) > 2)
+		    if (subject.interactions.surveys.indexOf("shopping")==-1) 
+			subject.interactions.surveys.push("shopping");
+	    }
 	    updateSubjectAttributeOnly(self, subject.ID, subject.interactions.lastLogin,
 				       "interactions.lastLogin",(self,err,data) => {
 					   console.log('Result of updating login:',err);
