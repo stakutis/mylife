@@ -1,2 +1,2 @@
 # mylife
-MyLife project
+Alexa MyLife project
