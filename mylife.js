@@ -200,6 +200,7 @@ function updateSubjectAttributeOnly(ID, data, attribute, nextFunction) {
 function sendSMS(toNumber, msg, nextFunc) {
   toNumber = toNumber.split("-")[0];
   console.log("will send [" + msg + "] to number:", toNumber);
+  //ToDo: use dotenv and .env to fix the below  code
   request.post(
     "https://api.twilio.com/2010-04-01/Accounts/AC6203fa66f81b40708bbc4810c28fe049/Messages",
     {
@@ -207,7 +208,7 @@ function sendSMS(toNumber, msg, nextFunc) {
       headers: { "content-type": "application/x-www-form-urlencoded" },
       auth: {
         user: "AC6203fa66f81b40708bbc4810c28fe049",
-        pass: "6866b679dd68e09efb537d43cc5f6dba",
+        pass: process.env.twilio,
       },
     },
     (err, resp, body) => {
