@@ -11,7 +11,7 @@
   "dependencies": {
     "alexa-sdk": "^1.0.25",
     "request": "^2.85.0",
-    "underscore": "^1.9.0",
+    "underscore": "^1.12.1",
     "xml2js": "^0.4.19"
   }
 }
